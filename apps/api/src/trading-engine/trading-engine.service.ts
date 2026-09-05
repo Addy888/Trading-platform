@@ -17,6 +17,7 @@ import {
 } from '@prisma/client';
 import Decimal from 'decimal.js';
 import { OpenTradeDto } from './dto/open-trade.dto';
+import { UpdatePositionDto } from './dto/update-position.dto';
 
 /**
  * Trading Engine Service
@@ -585,5 +586,96 @@ export class TradingEngineService {
         totalPages: Math.ceil(total / limit),
       },
     };
+  }
+
+  /**
+   * Update position SL/TP
+   */
+  async updatePosition(
+    tradingAccountId: string,
+    tradeId: string,
+    userId: string,
+    dto: UpdatePositionDto,
+  ) {
+    return this.prisma.$transaction(async (tx) => {
+      // 1. Fetch account
+      const account = await tx.tradingAccount.findUnique({
+        where: { id: tradingAccountId },
+      });
+
+      if (!account) {
+        throw new NotFoundException('Trading account not found');
+      }
+
+      // 2. Verify ownership
+      if (account.userId !== userId) {
+        throw new ForbiddenException('You do not own this trading account');
+      }
+
+      // 3. Fetch trade
+      const trade = await tx.trade.findUnique({
+        where: { id: tradeId },
+      });
+
+      if (!trade) {
+        throw new NotFoundException('Trade not found');
+      }
+
+      // 4. Verify trade belongs to account
+      if (trade.tradingAccountId !== tradingAccountId) {
+        throw new ForbiddenException('Trade does not belong to this account');
+      }
+
+      // 5. Verify trade is open
+      if (trade.status !== TradeStatus.OPEN) {
+        throw new BadRequestException('Trade is not open');
+      }
+
+      // 6. Update SL/TP
+      const updatedTrade = await tx.trade.update({
+        where: { id: tradeId },
+        data: {
+          stopLoss: dto.stopLoss ? new Decimal(dto.stopLoss) : trade.stopLoss,
+          takeProfit: dto.takeProfit ? new Decimal(dto.takeProfit) : trade.takeProfit,
+          updatedAt: new Date(),
+        },
+      });
+
+      // 7. Create audit log
+      await tx.auditLog.create({
+        data: {
+          actorId: userId,
+          action: 'POSITION_UPDATED',
+          entityType: 'Trade',
+          entityId: trade.id,
+          metadata: {
+            tradingAccountId,
+            symbol: trade.symbol,
+            stopLoss: updatedTrade.stopLoss?.toString(),
+            takeProfit: updatedTrade.takeProfit?.toString(),
+          },
+        },
+      });
+
+      this.logger.log(`Position updated: ${trade.id} - SL: ${dto.stopLoss}, TP: ${dto.takeProfit}`);
+
+      // Emit real-time position update event
+      this.eventEmitter.emit('position.updated', {
+        trade: updatedTrade,
+        accountNumber: account.accountNumber,
+      });
+
+      return {
+        id: updatedTrade.id,
+        symbol: updatedTrade.symbol,
+        side: updatedTrade.side,
+        volume: updatedTrade.volume.toString(),
+        entryPrice: updatedTrade.entryPrice.toString(),
+        stopLoss: updatedTrade.stopLoss?.toString(),
+        takeProfit: updatedTrade.takeProfit?.toString(),
+        status: updatedTrade.status,
+        openedAt: updatedTrade.openedAt,
+      };
+    });
   }
 }

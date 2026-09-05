@@ -277,7 +277,7 @@ export default function OrderDetailPage() {
                   </div>
                 )}
 
-                {order.payment?.status === 'SUCCESS' && order.tradingAccount && (
+                {order.payment?.status === 'COMPLETED' && order.tradingAccount && (
                   <div className="border-t pt-4">
                     <div className="bg-green-50 border border-green-200 rounded-lg p-4">
                       <p className="text-sm text-green-800">

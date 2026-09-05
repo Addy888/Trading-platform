@@ -2,6 +2,7 @@ import {
   Controller,
   Post,
   Get,
+  Patch,
   Body,
   Param,
   Query,
@@ -11,6 +12,7 @@ import {
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { TradingEngineService } from './trading-engine.service';
 import { OpenTradeDto } from './dto/open-trade.dto';
+import { UpdatePositionDto } from './dto/update-position.dto';
 import { TradeStatus } from '@prisma/client';
 
 @Controller('trading-accounts/:accountId')
@@ -44,6 +46,21 @@ export class TradingEngineController {
   ) {
     const userId = req.user.sub;
     return this.tradingEngine.closeTrade(accountId, tradeId, userId);
+  }
+
+  /**
+   * Update trade SL/TP
+   * PATCH /api/trading-accounts/:accountId/trades/:tradeId
+   */
+  @Patch('trades/:tradeId')
+  async updatePosition(
+    @Param('accountId') accountId: string,
+    @Param('tradeId') tradeId: string,
+    @Body() dto: UpdatePositionDto,
+    @Req() req: any,
+  ) {
+    const userId = req.user.sub;
+    return this.tradingEngine.updatePosition(accountId, tradeId, userId, dto);
   }
 
   /**

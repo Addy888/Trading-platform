@@ -2,6 +2,8 @@ import { Injectable, Logger } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { PrismaService } from '../prisma/prisma.service';
 import { MarketPriceService } from '../market-data/market-price.service';
+import { MarketDataEngineService, MarketTick } from '../market-data/market-data-engine.service';
+import { InstrumentConfigService } from '../market-data/instrument-config.service';
 import { ChallengeProgressService } from '../challenge-progress/challenge-progress.service';
 import { TradeStatus, TradeSide } from '@prisma/client';
 import Decimal from 'decimal.js';
@@ -31,6 +33,8 @@ export class RealtimeService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly marketPrice: MarketPriceService,
+    private readonly marketDataEngine: MarketDataEngineService,
+    private readonly instrumentConfig: InstrumentConfigService,
     private readonly challengeProgress: ChallengeProgressService,
   ) {}
 
@@ -42,12 +46,12 @@ export class RealtimeService {
   }
 
   /**
-   * Handle market price updates
+   * Handle market price updates (legacy - from SimulatedMarketEngineService)
    * 
    * This is triggered by SimulatedMarketEngineService
    */
   @OnEvent('market.prices.updated')
-  async handleMarketPriceUpdate(event: {
+  async handleMarketPriceUpdateLegacy(event: {
     prices: Array<{ symbol: string; price: string }>;
     timestamp: Date;
     source: string;
@@ -60,7 +64,7 @@ export class RealtimeService {
       const affectedAccounts = await this.findAffectedAccounts(updatedSymbols);
 
       this.logger.debug(
-        `Market update for ${updatedSymbols.length} symbols, ${affectedAccounts.length} accounts affected`,
+        `Market update (legacy) for ${updatedSymbols.length} symbols, ${affectedAccounts.length} accounts affected`,
       );
 
       // Process each affected account
@@ -68,7 +72,36 @@ export class RealtimeService {
         await this.updateAccountRealtime(accountId);
       }
     } catch (error) {
-      this.logger.error(`Error handling market price update: ${(error as Error).message}`);
+      this.logger.error(`Error handling market price update (legacy): ${(error as Error).message}`);
+    }
+  }
+
+  /**
+   * Handle market tick updates (new - from MarketDataEngineService)
+   */
+  @OnEvent('market.tick')
+  async handleMarketTick(event: {
+    ticks: MarketTick[];
+    timestamp: Date;
+    source: string;
+  }) {
+    try {
+      // Get all symbols that were updated
+      const updatedSymbols = event.ticks.map((t) => t.symbol);
+
+      // Find all accounts with open trades for these symbols
+      const affectedAccounts = await this.findAffectedAccounts(updatedSymbols);
+
+      this.logger.debug(
+        `Market tick for ${updatedSymbols.length} symbols, ${affectedAccounts.length} accounts affected`,
+      );
+
+      // Process each affected account
+      for (const accountId of affectedAccounts) {
+        await this.updateAccountRealtime(accountId);
+      }
+    } catch (error) {
+      this.logger.error(`Error handling market tick: ${(error as Error).message}`);
     }
   }
 

@@ -278,6 +278,26 @@ export default function DashboardPage() {
                 </div>
               </div>
 
+              {/* Trade Now Section - Active Accounts */}
+              {dashboard.accounts.active > 0 && (
+                <div className="bg-gradient-to-r from-blue-600 to-blue-700 rounded-lg shadow-lg p-6 mb-6">
+                  <div className="flex items-center justify-between text-white">
+                    <div>
+                      <h3 className="text-2xl font-bold mb-2">Ready to Trade?</h3>
+                      <p className="text-blue-100">
+                        You have {dashboard.accounts.active} active trading {dashboard.accounts.active === 1 ? 'account' : 'accounts'}
+                      </p>
+                    </div>
+                    <Link
+                      href="/dashboard/trading"
+                      className="px-8 py-4 bg-white text-blue-600 rounded-lg hover:bg-blue-50 font-bold text-lg shadow-lg transition-all transform hover:scale-105"
+                    >
+                      Open Trading Terminal →
+                    </Link>
+                  </div>
+                </div>
+              )}
+
               {/* Quick Actions */}
               {dashboard.accounts.total === 0 && (
                 <div className="bg-blue-50 border border-blue-200 rounded-lg p-6">

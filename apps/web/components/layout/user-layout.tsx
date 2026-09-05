@@ -23,14 +23,15 @@ export function UserLayout({ children }: UserLayoutProps) {
 
   const navigation = [
     { name: 'Dashboard', href: '/dashboard', icon: '🏠' },
-    { name: 'Profile', href: '/dashboard/profile', icon: '👤' },
-    { name: 'Notifications', href: '/dashboard/notifications', icon: '🔔' },
+    { name: 'Trading', href: '/dashboard/trading', icon: '📈' },
     { name: 'Challenges', href: '/dashboard/challenges', icon: '🎯' },
     { name: 'My Orders', href: '/dashboard/orders', icon: '📦' },
     { name: 'Trading Accounts', href: '/dashboard/accounts', icon: '💼' },
-    { name: 'Settings', href: '/dashboard/settings/notifications', icon: '⚙️' },
+    { name: 'Notifications', href: '/dashboard/notifications', icon: '🔔' },
     { name: 'Payouts', href: '#', icon: '💰', comingSoon: true },
     { name: 'KYC', href: '#', icon: '✅', comingSoon: true },
+    { name: 'Profile', href: '/dashboard/profile', icon: '👤' },
+    { name: 'Settings', href: '/dashboard/settings/notifications', icon: '⚙️' },
   ];
 
   return (

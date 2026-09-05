@@ -9,6 +9,7 @@
     "start:dev": "nest start --watch",
     "start:prod": "node dist/main",
     "prisma:seed": "ts-node prisma/seed.ts",
+    "prisma:seed:dev": "ts-node prisma/seed-dev-account.ts",
     "create:admin": "ts-node scripts/create-admin.ts"
   },
   "prisma": {
@@ -35,6 +36,7 @@
     "bcrypt": "^6.0.0",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.15.1",
+    "decimal.js": "^10.6.0",
     "dotenv": "^17.4.2",
     "mariadb": "^3.5.3",
     "mysql2": "^3.23.4",

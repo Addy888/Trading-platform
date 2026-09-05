@@ -28,7 +28,7 @@ export interface Payment {
   orderId: string;
   amount: string;
   currency: string;
-  status: 'PENDING' | 'SUCCESS' | 'FAILED' | 'REFUNDED';
+  status: 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED' | 'REJECTED' | 'REFUNDED';
   provider: string;
   providerReference?: string;
   createdAt: string;

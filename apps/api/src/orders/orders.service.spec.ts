@@ -4,7 +4,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { AccountSnapshotsService } from '../account-snapshots/account-snapshots.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
-import { OrderStatus, PaymentStatus, ChallengeStatus, TradingAccountStatus } from '@prisma/client';
+import { OrderStatus, PaymentStatusExtended, ChallengeStatus, TradingAccountStatus } from '@prisma/client';
 
 describe('OrdersService', () => {
   let service: OrdersService;
@@ -53,7 +53,7 @@ describe('OrdersService', () => {
     updatedAt: new Date(),
     payment: {
       id: 'payment-123',
-      status: PaymentStatus.PENDING,
+      status: PaymentStatusExtended.PENDING,
     },
     challengePlan: mockChallengePlan,
     tradingAccount: null,
@@ -236,7 +236,7 @@ describe('OrdersService', () => {
             update: jest.fn().mockResolvedValue({ ...mockOrder, status: OrderStatus.PAID }),
           },
           payment: {
-            update: jest.fn().mockResolvedValue({ ...mockOrder.payment, status: PaymentStatus.SUCCESS }),
+            update: jest.fn().mockResolvedValue({ ...mockOrder.payment, status: PaymentStatusExtended.COMPLETED }),
           },
           tradingAccount: {
             create: jest.fn().mockResolvedValue(mockTradingAccount),
@@ -296,7 +296,7 @@ describe('OrdersService', () => {
             update: jest.fn().mockResolvedValue({ ...mockOrder, status: OrderStatus.PAID }),
           },
           payment: {
-            update: jest.fn().mockResolvedValue({ ...mockOrder.payment, status: PaymentStatus.SUCCESS }),
+            update: jest.fn().mockResolvedValue({ ...mockOrder.payment, status: PaymentStatusExtended.COMPLETED }),
           },
           tradingAccount: {
             create: jest.fn().mockResolvedValue(mockTradingAccount),
@@ -337,7 +337,7 @@ describe('OrdersService', () => {
             update: jest.fn().mockResolvedValue({ ...mockOrder, status: OrderStatus.FAILED }),
           },
           payment: {
-            update: jest.fn().mockResolvedValue({ ...mockOrder.payment, status: PaymentStatus.FAILED }),
+            update: jest.fn().mockResolvedValue({ ...mockOrder.payment, status: PaymentStatusExtended.REJECTED }),
           },
           auditLog: {
             create: jest.fn().mockResolvedValue({}),
@@ -376,7 +376,7 @@ describe('OrdersService', () => {
             update: jest.fn().mockResolvedValue({ ...mockOrder, status: OrderStatus.FAILED }),
           },
           payment: {
-            update: jest.fn().mockResolvedValue({ ...mockOrder.payment, status: PaymentStatus.FAILED }),
+            update: jest.fn().mockResolvedValue({ ...mockOrder.payment, status: PaymentStatusExtended.REJECTED }),
           },
           auditLog: {
             create: auditLogSpy,
@@ -407,7 +407,7 @@ describe('OrdersService', () => {
             update: jest.fn().mockResolvedValue({ ...mockOrder, status: OrderStatus.FAILED }),
           },
           payment: {
-            update: jest.fn().mockResolvedValue({ ...mockOrder.payment, status: PaymentStatus.FAILED }),
+            update: jest.fn().mockResolvedValue({ ...mockOrder.payment, status: PaymentStatusExtended.REJECTED }),
           },
           auditLog: {
             create: jest.fn().mockResolvedValue({}),
@@ -447,3 +447,4 @@ describe('OrdersService', () => {
     });
   });
 });
+

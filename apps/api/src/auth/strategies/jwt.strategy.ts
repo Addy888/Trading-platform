@@ -35,6 +35,12 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       throw new UnauthorizedException();
     }
 
-    return user;
+    // CRITICAL: Return user with 'sub' field for consistency
+    // The 'sub' field is used throughout the application for user ID
+    return {
+      ...user,
+      sub: user.id,  // Ensure 'sub' is always available
+      userId: user.id,  // Add userId alias for compatibility
+    };
   }
 }

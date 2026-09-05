@@ -138,10 +138,27 @@ export default function TradingAccountsPage() {
                       )}
                     </div>
 
-                    <div className="mt-4 pt-4 border-t">
-                      <button className="w-full bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700 text-sm font-semibold">
-                        View Account
+                    <div className="mt-4 pt-4 border-t space-y-2">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          router.push(`/dashboard/accounts/${account.id}`);
+                        }}
+                        className="w-full bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700 text-sm font-semibold"
+                      >
+                        View Details
                       </button>
+                      {account.status === 'ACTIVE' && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            router.push(`/dashboard/trading/${account.id}`);
+                          }}
+                          className="w-full bg-green-600 text-white py-2 rounded-lg hover:bg-green-700 text-sm font-semibold"
+                        >
+                          Open Trading Terminal
+                        </button>
+                      )}
                     </div>
                   </div>
                 </div>

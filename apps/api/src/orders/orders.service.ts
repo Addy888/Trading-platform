@@ -4,7 +4,7 @@ import { AccountSnapshotsService } from '../account-snapshots/account-snapshots.
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { OrdersQueryDto } from './dto/orders-query.dto';
-import { OrderStatus, PaymentStatus, ChallengeStatus, TradingAccountStatus } from '@prisma/client';
+import { OrderStatus, PaymentStatusExtended, ChallengeStatus, TradingAccountStatus } from '@prisma/client';
 import Decimal from 'decimal.js';
 
 @Injectable()
@@ -71,7 +71,7 @@ export class OrdersService {
           create: {
             amount: challengePlan.price,
             currency: challengePlan.currency,
-            status: PaymentStatus.PENDING,
+            status: PaymentStatusExtended.PENDING,
             provider: 'MANUAL_TEST',
             providerReference: `TEST-${Date.now()}-${Math.random().toString(36).substring(7)}`,
           },
@@ -280,7 +280,7 @@ export class OrdersService {
       // Update payment status
       await tx.payment.update({
         where: { id: order.payment.id },
-        data: { status: PaymentStatus.SUCCESS },
+        data: { status: PaymentStatusExtended.COMPLETED },
       });
 
       // Update order status
@@ -389,14 +389,14 @@ export class OrdersService {
         throw new BadRequestException('Payment not found for this order');
       }
 
-      if (order.payment.status === PaymentStatus.SUCCESS) {
+      if (order.payment.status === PaymentStatusExtended.COMPLETED) {
         throw new BadRequestException('Cannot reject completed payment');
       }
 
       // Update payment status
       await tx.payment.update({
         where: { id: order.payment.id },
-        data: { status: PaymentStatus.FAILED },
+        data: { status: PaymentStatusExtended.REJECTED },
       });
 
       // Update order status
