@@ -58,6 +58,30 @@ export class SimulatedMarketEngineService implements OnModuleInit, OnModuleDestr
       volatility: 0.0006,
       precision: 5,
     },
+    {
+      symbol: 'USDJPY',
+      initialPrice: 148.50,
+      minPrice: 100.00,
+      maxPrice: 160.00,
+      volatility: 0.0005,
+      precision: 3,
+    },
+    {
+      symbol: 'AUDUSD',
+      initialPrice: 0.6550,
+      minPrice: 0.6000,
+      maxPrice: 0.7500,
+      volatility: 0.0006,
+      precision: 5,
+    },
+    {
+      symbol: 'USDCAD',
+      initialPrice: 1.3520,
+      minPrice: 1.2000,
+      maxPrice: 1.4500,
+      volatility: 0.0005,
+      precision: 5,
+    },
     // Commodities
     {
       symbol: 'XAUUSD', // Gold
@@ -67,6 +91,22 @@ export class SimulatedMarketEngineService implements OnModuleInit, OnModuleDestr
       volatility: 0.001, // ±0.1%
       precision: 2,
     },
+    {
+      symbol: 'XAGUSD', // Silver
+      initialPrice: 24.50,
+      minPrice: 18.00,
+      maxPrice: 35.00,
+      volatility: 0.0015,
+      precision: 3,
+    },
+    {
+      symbol: 'WTIUSD', // Oil
+      initialPrice: 78.50,
+      minPrice: 50.00,
+      maxPrice: 120.00,
+      volatility: 0.002,
+      precision: 2,
+    },
     // Crypto
     {
       symbol: 'BTCUSD',
@@ -74,6 +114,14 @@ export class SimulatedMarketEngineService implements OnModuleInit, OnModuleDestr
       minPrice: 20000.00,
       maxPrice: 70000.00,
       volatility: 0.002, // ±0.2% (more volatile)
+      precision: 2,
+    },
+    {
+      symbol: 'ETHUSD',
+      initialPrice: 2300.00,
+      minPrice: 1000.00,
+      maxPrice: 4500.00,
+      volatility: 0.0025, // ±0.25% (more volatile)
       precision: 2,
     },
   ];
