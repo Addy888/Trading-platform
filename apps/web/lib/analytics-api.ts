@@ -135,4 +135,16 @@ export const analyticsApi = {
     });
     return handleResponse(response);
   },
+
+  async getAdminAnalytics(token: string, timeRange: string = '30d'): Promise<any> {
+    const response = await fetch(
+      `${API_BASE_URL}/analytics/admin?timeRange=${timeRange}`,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      }
+    );
+    return handleResponse(response);
+  },
 };

@@ -1,0 +1,44 @@
+================================================================================
+EXECUTE THIS NOW TO FIX DATABASE
+================================================================================
+
+METHOD 1 - MySQL Workbench (Easiest):
+--------------------------------------
+1. Open MySQL Workbench
+2. Connect to localhost (you'll be prompted for MySQL password)
+3. Click "New SQL Tab"
+4. Copy and paste this ENTIRE block:
+
+CREATE DATABASE IF NOT EXISTS tradeing_db;
+CREATE USER IF NOT EXISTS 'trading_app'@'localhost' IDENTIFIED BY 'TradingSecure2026!';
+CREATE USER IF NOT EXISTS 'trading_app'@'127.0.0.1' IDENTIFIED BY 'TradingSecure2026!';
+GRANT ALL PRIVILEGES ON tradeing_db.* TO 'trading_app'@'localhost';
+GRANT ALL PRIVILEGES ON tradeing_db.* TO 'trading_app'@'127.0.0.1';
+FLUSH PRIVILEGES;
+
+5. Click "Execute" (lightning bolt icon)
+6. Reply to me: "EXECUTED"
+
+================================================================================
+
+METHOD 2 - Command Line:
+-------------------------
+1. Open Command Prompt as Administrator
+2. Run:
+   cd "C:\Program Files\MySQL\MySQL Server 9.7\bin"
+   mysql -u root -p
+
+3. Enter your MySQL root password when prompted
+4. Copy and paste the SQL block above
+5. Type: EXIT
+6. Reply to me: "EXECUTED"
+
+================================================================================
+
+After executing, I will:
+- Generate Prisma client
+- Seed admin account
+- Start backend
+- Verify admin login works
+
+================================================================================

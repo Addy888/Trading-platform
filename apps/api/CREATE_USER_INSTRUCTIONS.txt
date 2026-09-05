@@ -1,0 +1,47 @@
+===============================================
+MYSQL USER CREATION REQUIRED
+===============================================
+
+The MySQL root password configured in .env is incorrect.
+Root authentication is failing.
+
+I need to create a dedicated application user: trading_app
+
+===============================================
+EXECUTE THESE SQL COMMANDS IN MYSQL:
+===============================================
+
+CREATE USER IF NOT EXISTS 'trading_app'@'localhost' IDENTIFIED BY 'TradingApp2026!Secure';
+GRANT ALL PRIVILEGES ON tradeing_db.* TO 'trading_app'@'localhost';
+CREATE DATABASE IF NOT EXISTS tradeing_db;
+FLUSH PRIVILEGES;
+
+===============================================
+HOW TO EXECUTE:
+===============================================
+
+METHOD 1 - MySQL Workbench:
+1. Open MySQL Workbench
+2. Connect to localhost
+3. Paste and execute the commands above
+
+METHOD 2 - Command Line (if you have mysql.exe in PATH):
+mysql -u root -p
+(enter your actual root password)
+Then paste the SQL commands
+
+METHOD 3 - HeidiSQL/phpMyAdmin/any MySQL client:
+Connect and execute the SQL commands
+
+===============================================
+AFTER CREATING USER:
+===============================================
+
+Run this test:
+cd apps\api
+node test-new-user.js
+
+If successful, reply: "User created"
+Then I will update .env and complete the fix.
+
+===============================================

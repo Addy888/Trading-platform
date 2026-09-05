@@ -28,11 +28,11 @@ export function AdminLayout({ children }: AdminLayoutProps) {
     { name: 'Rule Sets', href: '/admin/rule-sets', icon: '📑' },
     { name: 'Orders', href: '/admin/orders', icon: '📦' },
     { name: 'Trading Accounts', href: '/admin/trading-accounts', icon: '💼' },
-    { name: 'Payments', href: '#', icon: '💳', comingSoon: true },
-    { name: 'Payouts', href: '#', icon: '💰', comingSoon: true },
-    { name: 'KYC', href: '#', icon: '✅', comingSoon: true },
-    { name: 'Analytics', href: '#', icon: '📈', comingSoon: true },
-    { name: 'Notifications', href: '#', icon: '🔔', comingSoon: true },
+    { name: 'Payments', href: '/admin/payments', icon: '💳' },
+    { name: 'Payouts', href: '/admin/payouts', icon: '💰' },
+    { name: 'KYC', href: '/admin/kyc', icon: '✅' },
+    { name: 'Analytics', href: '/admin/analytics', icon: '📈' },
+    { name: 'Notifications', href: '/admin/notifications', icon: '🔔' },
     { name: 'Settings', href: '/admin/settings', icon: '⚙️' },
   ];
 
@@ -51,19 +51,15 @@ export function AdminLayout({ children }: AdminLayoutProps) {
             {navigation.map((item) => (
               <Link
                 key={item.name}
-                href={item.comingSoon ? '#' : item.href}
+                href={item.href}
                 className={`flex items-center px-6 py-3 text-sm ${
                   pathname === item.href
                     ? 'bg-gray-800 text-white border-l-4 border-blue-500'
                     : 'text-gray-300 hover:bg-gray-800 hover:text-white'
-                } ${item.comingSoon ? 'opacity-50 cursor-not-allowed' : ''}`}
-                onClick={(e) => item.comingSoon && e.preventDefault()}
+                }`}
               >
                 <span className="mr-3">{item.icon}</span>
                 <span>{item.name}</span>
-                {item.comingSoon && (
-                  <span className="ml-auto text-xs text-gray-500">Soon</span>
-                )}
               </Link>
             ))}
           </nav>

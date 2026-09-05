@@ -3,3 +3,18 @@ node_modules
 .env
 
 /generated/prisma
+
+@"
+node_modules/
+.next/
+out/
+dist/
+build/
+coverage/
+.vercel/
+.env
+.env.*
+!.env.example
+*.log
+.DS_Store
+"@ | Set-Content -Path "C:\Users\ADITYA\OneDrive\Desktop\Trading\.gitignore"
