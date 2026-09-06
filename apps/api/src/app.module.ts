@@ -24,6 +24,7 @@ import { NotificationPreferencesModule } from './notification-preferences/notifi
 import { EmailModule } from './email/email.module';
 import { KycModule } from './kyc/kyc.module';
 import { PayoutsModule } from './payouts/payouts.module';
+import { SettingsModule } from './settings/settings.module';
 
 @Module({
   imports: [
@@ -52,6 +53,7 @@ import { PayoutsModule } from './payouts/payouts.module';
     EmailModule,
     KycModule,
     PayoutsModule,
+    SettingsModule,
   ],
 })
 export class AppModule {}

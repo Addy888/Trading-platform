@@ -28,7 +28,7 @@ export class AdminTradesService {
     }
 
     if (symbol) {
-      where.symbol = { contains: symbol, mode: 'insensitive' };
+      where.symbol = { contains: symbol };
     }
 
     if (accountId) {
@@ -53,9 +53,9 @@ export class AdminTradesService {
 
     if (search) {
       where.OR = [
-        { symbol: { contains: search, mode: 'insensitive' } },
-        { tradingAccount: { accountNumber: { contains: search, mode: 'insensitive' } } },
-        { tradingAccount: { user: { email: { contains: search, mode: 'insensitive' } } } },
+        { symbol: { contains: search } },
+        { tradingAccount: { accountNumber: { contains: search } } },
+        { tradingAccount: { user: { email: { contains: search } } } },
       ];
     }
 

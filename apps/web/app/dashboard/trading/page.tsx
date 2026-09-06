@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useAuth } from '@/lib/auth-context';
 import { ProtectedRoute } from '@/components/protected-route';
@@ -10,7 +10,6 @@ import { tradingApi, type TradingAccount } from '@/lib/trading-api';
 
 export default function TradingDashboardPage() {
   const router = useRouter();
-  const searchParams = useSearchParams();
   const { accessToken } = useAuth();
   
   const [accounts, setAccounts] = useState<TradingAccount[]>([]);

@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { ProtectedRoute } from '@/components/protected-route';
 import { AdminLayout } from '@/components/layout/admin-layout';
 import { useAuth } from '@/lib/auth-context';
-import { kycApi, KYCSubmission } from '@/lib/kyc-api';
+import { adminKycApi, KYCSubmission } from '@/lib/admin-kyc-api';
 import Link from 'next/link';
 
 export default function KYCPage() {
@@ -28,7 +28,7 @@ export default function KYCPage() {
     try {
       setLoading(true);
       setError('');
-      const response = await kycApi.getKYCSubmissions(accessToken, {
+      const response = await adminKycApi.getKYCSubmissions(accessToken, {
         page,
         limit: 20,
         search: search || undefined,
@@ -69,15 +69,15 @@ export default function KYCPage() {
       setActionLoading(submissionId);
       if (action === 'approve') {
         const notes = prompt('Add optional approval notes:');
-        await kycApi.approveKYC(accessToken, submissionId, notes || undefined);
+        await adminKycApi.approveKYC(accessToken, submissionId, notes || undefined);
       } else if (action === 'reject') {
         const reason = prompt('Provide a reason for rejection (required):');
         if (!reason) return;
-        await kycApi.rejectKYC(accessToken, submissionId, reason);
+        await adminKycApi.rejectKYC(accessToken, submissionId, reason);
       } else if (action === 'resubmit') {
         const reason = prompt('Provide a reason for requesting resubmission (required):');
         if (!reason) return;
-        await kycApi.requestResubmission(accessToken, submissionId, reason);
+        await adminKycApi.requestResubmission(accessToken, submissionId, reason);
       }
       await fetchSubmissions();
     } catch (err: any) {
@@ -244,17 +244,19 @@ export default function KYCPage() {
                             >
                               {submission.status.replace(/_/g, ' ')}
                             </span>
-                            {submission.reviewer && (
+                            {submission.reviewedBy && (
                               <div className="text-xs text-gray-500 mt-1">
-                                by {submission.reviewer.firstName} {submission.reviewer.lastName}
+                                Reviewed by admin
                               </div>
                             )}
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                            {new Date(submission.submittedAt).toLocaleDateString()}
-                            <div className="text-xs text-gray-400">
-                              {new Date(submission.submittedAt).toLocaleTimeString()}
-                            </div>
+                            {submission.submittedAt ? new Date(submission.submittedAt).toLocaleDateString() : '-'}
+                            {submission.submittedAt && (
+                              <div className="text-xs text-gray-400">
+                                {new Date(submission.submittedAt).toLocaleTimeString()}
+                              </div>
+                            )}
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm space-y-1">
                             <Link

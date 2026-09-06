@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { ProtectedRoute } from '@/components/protected-route';
 import { UserLayout } from '@/components/layout/user-layout';
@@ -7,8 +8,10 @@ import { UserLayout } from '@/components/layout/user-layout';
 export default function SettingsPage() {
   const router = useRouter();
 
-  // Redirect to profile by default
-  router.push('/dashboard/settings/profile');
+  useEffect(() => {
+    // Redirect to profile by default
+    router.push('/dashboard/settings/profile');
+  }, [router]);
 
   return (
     <ProtectedRoute requireRole="USER">
