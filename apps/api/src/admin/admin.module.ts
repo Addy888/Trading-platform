@@ -9,6 +9,8 @@ import { AdminPayoutsController } from './admin-payouts.controller';
 import { AdminPayoutsService } from './admin-payouts.service';
 import { AdminKYCController } from './admin-kyc.controller';
 import { AdminKYCService } from './admin-kyc.service';
+import { AdminTradesController } from './admin-trades.controller';
+import { AdminTradesService } from './admin-trades.service';
 
 @Module({
   controllers: [
@@ -17,6 +19,7 @@ import { AdminKYCService } from './admin-kyc.service';
     AdminPaymentsController,
     AdminPayoutsController,
     AdminKYCController,
+    AdminTradesController,
   ],
   providers: [
     AdminService,
@@ -24,6 +27,7 @@ import { AdminKYCService } from './admin-kyc.service';
     AdminPaymentsService,
     AdminPayoutsService,
     AdminKYCService,
+    AdminTradesService,
   ],
   exports: [
     AdminService,
@@ -31,6 +35,7 @@ import { AdminKYCService } from './admin-kyc.service';
     AdminPaymentsService,
     AdminPayoutsService,
     AdminKYCService,
+    AdminTradesService,
   ],
 })
 export class AdminModule {}

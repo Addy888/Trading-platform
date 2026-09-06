@@ -25,6 +25,7 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
   const [socket, setSocket] = useState<Socket | null>(null);
   const [connected, setConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [authFailed, setAuthFailed] = useState(false);
 
   useEffect(() => {
     if (!accessToken) {
@@ -34,6 +35,12 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
         setSocket(null);
         setConnected(false);
       }
+      setAuthFailed(false);
+      return;
+    }
+
+    // Don't reconnect if authentication failed
+    if (authFailed) {
       return;
     }
 
@@ -47,6 +54,7 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
       reconnectionDelay: 1000,
       reconnectionDelayMax: 5000,
       reconnectionAttempts: 5,
+      autoConnect: true,
     });
 
     // Connection event handlers
@@ -54,14 +62,15 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
       console.log('WebSocket connected');
       setConnected(true);
       setError(null);
+      setAuthFailed(false);
     });
 
     newSocket.on('disconnect', (reason) => {
       console.log('WebSocket disconnected:', reason);
       setConnected(false);
       
-      if (reason === 'io server disconnect') {
-        // Server disconnected, try to reconnect manually
+      // Don't auto-reconnect on auth failures
+      if (reason === 'io server disconnect' && !authFailed) {
         newSocket.connect();
       }
     });
@@ -70,6 +79,12 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
       console.error('WebSocket connection error:', err.message);
       setError(err.message);
       setConnected(false);
+      
+      // Check if it's an auth error
+      if (err.message.includes('Authentication') || err.message.includes('auth')) {
+        setAuthFailed(true);
+        newSocket.disconnect();
+      }
     });
 
     newSocket.on('connection:ready', (data) => {
@@ -79,17 +94,24 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
     newSocket.on('system:error', (data) => {
       console.error('System error:', data);
       setError(data.message);
+      
+      // Stop reconnection on auth failures
+      if (data.code === 'AUTH_FAILED' || data.code === 'UNAUTHORIZED') {
+        setAuthFailed(true);
+        newSocket.disconnect();
+      }
     });
 
     setSocket(newSocket);
 
     // Cleanup on unmount
     return () => {
+      newSocket.removeAllListeners();
       newSocket.disconnect();
       setSocket(null);
       setConnected(false);
     };
-  }, [accessToken]);
+  }, [accessToken, authFailed]);
 
   return (
     <SocketContext.Provider value={{ socket, connected, error }}>

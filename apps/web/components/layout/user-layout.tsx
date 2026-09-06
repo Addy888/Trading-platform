@@ -28,8 +28,8 @@ export function UserLayout({ children }: UserLayoutProps) {
     { name: 'My Orders', href: '/dashboard/orders', icon: '📦' },
     { name: 'Trading Accounts', href: '/dashboard/accounts', icon: '💼' },
     { name: 'Notifications', href: '/dashboard/notifications', icon: '🔔' },
-    { name: 'Payouts', href: '#', icon: '💰', comingSoon: true },
-    { name: 'KYC', href: '#', icon: '✅', comingSoon: true },
+    { name: 'Payouts', href: '/dashboard/payouts', icon: '💰' },
+    { name: 'KYC', href: '/dashboard/kyc', icon: '✅' },
     { name: 'Profile', href: '/dashboard/profile', icon: '👤' },
     { name: 'Settings', href: '/dashboard/settings/notifications', icon: '⚙️' },
   ];
@@ -91,19 +91,15 @@ export function UserLayout({ children }: UserLayoutProps) {
                 {navigation.map((item) => (
                   <Link
                     key={item.name}
-                    href={item.comingSoon ? '#' : item.href}
+                    href={item.href}
                     className={`flex items-center px-4 py-2 text-sm rounded-md ${
                       pathname === item.href
                         ? 'bg-blue-50 text-blue-700 font-medium'
                         : 'text-gray-700 hover:bg-gray-50'
-                    } ${item.comingSoon ? 'opacity-50 cursor-not-allowed' : ''}`}
-                    onClick={(e) => item.comingSoon && e.preventDefault()}
+                    }`}
                   >
                     <span className="mr-3">{item.icon}</span>
                     <span>{item.name}</span>
-                    {item.comingSoon && (
-                      <span className="ml-auto text-xs text-gray-400">Soon</span>
-                    )}
                   </Link>
                 ))}
               </nav>

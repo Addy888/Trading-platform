@@ -490,4 +490,78 @@ export class AdminService {
       };
     }
   }
+
+  async sendNotification(
+    adminId: string,
+    userId: string | undefined,
+    userIds: string[] | undefined,
+    broadcastToAll: boolean,
+    type: any,
+    priority: any,
+    title: string,
+    message: string,
+    data: any,
+  ) {
+    let targetUserIds: string[] = [];
+
+    if (broadcastToAll) {
+      // Get all active user IDs
+      const users = await this.prisma.user.findMany({
+        where: { isActive: true, role: Role.USER },
+        select: { id: true },
+      });
+      targetUserIds = users.map(u => u.id);
+    } else if (userIds && userIds.length > 0) {
+      targetUserIds = userIds;
+    } else if (userId) {
+      targetUserIds = [userId];
+    } else {
+      throw new BadRequestException(
+        'Must specify userId, userIds, or broadcastToAll',
+      );
+    }
+
+    // Create notifications for all target users
+    const notifications = await Promise.all(
+      targetUserIds.map(uid =>
+        this.prisma.notification.create({
+          data: {
+            userId: uid,
+            type: type,
+            priority: priority,
+            title,
+            message,
+            data: data || {},
+          },
+        }),
+      ),
+    );
+
+    // Create audit log
+    await this.prisma.auditLog.create({
+      data: {
+        actorId: adminId,
+        action: 'ADMIN_NOTIFICATION_SENT',
+        entityType: 'Notification',
+        entityId: notifications[0]?.id || 'bulk',
+        metadata: {
+          recipientCount: targetUserIds.length,
+          type,
+          title,
+          broadcastToAll,
+        },
+      },
+    });
+
+    // Emit events for real-time delivery
+    notifications.forEach(notification => {
+      this.eventEmitter.emit('notification.created', notification);
+    });
+
+    return {
+      success: true,
+      count: notifications.length,
+      message: `Notification sent to ${notifications.length} user(s)`,
+    };
+  }
 }

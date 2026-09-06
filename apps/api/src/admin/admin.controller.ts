@@ -1,6 +1,7 @@
 import {
   Controller,
   Get,
+  Post,
   Patch,
   Param,
   Body,
@@ -17,6 +18,7 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Role } from '@prisma/client';
 import { AdminService } from './admin.service';
 import { UpdateUserStatusDto } from './dto/update-user-status.dto';
+import { SendNotificationDto } from './dto/send-notification.dto';
 
 @Controller('admin')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -80,5 +82,24 @@ export class AdminController {
     @Query('actorId') actorId?: string,
   ) {
     return this.adminService.getAuditLogs(page, limit, search, action, actorId);
+  }
+
+  @Post('notifications/send')
+  async sendNotification(
+    @Body() dto: SendNotificationDto,
+    @CurrentUser('sub') adminId: string,
+  ) {
+    const broadcastToAll = dto.broadcastToAll === 'true';
+    return this.adminService.sendNotification(
+      adminId,
+      dto.userId,
+      dto.userIds,
+      broadcastToAll,
+      dto.type,
+      dto.priority,
+      dto.title,
+      dto.message,
+      dto.data,
+    );
   }
 }

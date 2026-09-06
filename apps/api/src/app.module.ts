@@ -22,6 +22,8 @@ import { RealtimeModule } from './realtime/realtime.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { NotificationPreferencesModule } from './notification-preferences/notification-preferences.module';
 import { EmailModule } from './email/email.module';
+import { KycModule } from './kyc/kyc.module';
+import { PayoutsModule } from './payouts/payouts.module';
 
 @Module({
   imports: [
@@ -48,6 +50,8 @@ import { EmailModule } from './email/email.module';
     NotificationsModule,
     NotificationPreferencesModule,
     EmailModule,
+    KycModule,
+    PayoutsModule,
   ],
 })
 export class AppModule {}

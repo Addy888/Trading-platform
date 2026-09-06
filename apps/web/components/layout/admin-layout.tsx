@@ -28,12 +28,15 @@ export function AdminLayout({ children }: AdminLayoutProps) {
     { name: 'Rule Sets', href: '/admin/rule-sets', icon: '📑' },
     { name: 'Orders', href: '/admin/orders', icon: '📦' },
     { name: 'Trading Accounts', href: '/admin/trading-accounts', icon: '💼' },
+    { name: 'Trades', href: '/admin/trades', icon: '📈' },
     { name: 'Payments', href: '/admin/payments', icon: '💳' },
     { name: 'Payouts', href: '/admin/payouts', icon: '💰' },
     { name: 'KYC', href: '/admin/kyc', icon: '✅' },
     { name: 'Analytics', href: '/admin/analytics', icon: '📈' },
     { name: 'Notifications', href: '/admin/notifications', icon: '🔔' },
+    { name: 'Audit Logs', href: '/admin/audit-logs', icon: '📜' },
     { name: 'Settings', href: '/admin/settings', icon: '⚙️' },
+    { name: 'System Health', href: '/admin/health', icon: '❤️' },
   ];
 
   return (

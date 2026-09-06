@@ -1,128 +1,129 @@
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
 
-async function handleResponse(response: Response) {
-  if (!response.ok) {
-    let errorData: any;
-    try {
-      errorData = await response.json();
-    } catch {
-      throw new Error('An error occurred');
-    }
-    throw new Error(errorData.message || 'An error occurred');
-  }
-  return response.json();
-}
-
-export interface KYCSubmission {
+export interface KycSubmission {
   id: string;
   userId: string;
-  status: string;
-  documentType?: string;
-  documentNumber?: string;
-  fullName?: string;
-  dateOfBirth?: string;
-  address?: string;
-  city?: string;
-  country?: string;
-  postalCode?: string;
-  submittedAt: string;
-  reviewedAt?: string;
-  reviewedBy?: string;
-  reviewNotes?: string;
-  metadata?: any;
+  status: 'NOT_SUBMITTED' | 'PENDING' | 'APPROVED' | 'REJECTED' | 'RESUBMISSION_REQUESTED';
+  fullName: string | null;
+  dateOfBirth: string | null;
+  address: string | null;
+  city: string | null;
+  country: string | null;
+  postalCode: string | null;
+  documentType: string | null;
+  documentNumber: string | null;
+  documentFrontUrl: string | null;
+  documentBackUrl: string | null;
+  selfieUrl: string | null;
+  submittedAt: string | null;
+  reviewedAt: string | null;
+  reviewNotes: string | null;
   createdAt: string;
   updatedAt: string;
-  user?: {
-    id: string;
-    email: string;
-    firstName: string;
-    lastName: string;
-  };
-  reviewer?: {
-    id: string;
-    email: string;
-    firstName: string;
-    lastName: string;
-  };
+}
+
+export interface SubmitKycData {
+  fullName: string;
+  dateOfBirth: string;
+  address: string;
+  city: string;
+  country: string;
+  postalCode: string;
+  documentType: string;
+  documentNumber: string;
+  documentFrontUrl?: string;
+  documentBackUrl?: string;
+  selfieUrl?: string;
+  metadata?: any;
 }
 
 export const kycApi = {
-  async getKYCSubmissions(
-    token: string,
-    params: {
-      page?: number;
-      limit?: number;
-      search?: string;
-      status?: string;
-      userId?: string;
-    } = {},
-  ) {
-    const queryParams = new URLSearchParams();
-    if (params.page) queryParams.append('page', params.page.toString());
-    if (params.limit) queryParams.append('limit', params.limit.toString());
-    if (params.search) queryParams.append('search', params.search);
-    if (params.status) queryParams.append('status', params.status);
-    if (params.userId) queryParams.append('userId', params.userId);
-
-    const response = await fetch(`${API_BASE_URL}/admin/kyc?${queryParams}`, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    });
-    return handleResponse(response);
-  },
-
-  async getKYCSubmissionById(token: string, submissionId: string): Promise<KYCSubmission> {
-    const response = await fetch(`${API_BASE_URL}/admin/kyc/${submissionId}`, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    });
-    return handleResponse(response);
-  },
-
-  async approveKYC(token: string, submissionId: string, notes?: string) {
-    const response = await fetch(`${API_BASE_URL}/admin/kyc/${submissionId}/approve`, {
+  async submitKyc(accessToken: string, data: SubmitKycData): Promise<KycSubmission> {
+    const response = await fetch(`${API_URL}/kyc`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
+        Authorization: `Bearer ${accessToken}`,
       },
-      body: JSON.stringify({ notes }),
+      body: JSON.stringify(data),
     });
-    return handleResponse(response);
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.message || 'Failed to submit KYC');
+    }
+
+    return response.json();
   },
 
-  async rejectKYC(token: string, submissionId: string, reason: string) {
-    const response = await fetch(`${API_BASE_URL}/admin/kyc/${submissionId}/reject`, {
-      method: 'POST',
+  async getOwnKyc(accessToken: string): Promise<KycSubmission | null> {
+    const response = await fetch(`${API_URL}/kyc`, {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    });
+
+    if (!response.ok) {
+      if (response.status === 404) {
+        return null;
+      }
+      // Try to parse error, but handle empty responses
+      try {
+        const error = await response.json();
+        throw new Error(error.message || 'Failed to load KYC');
+      } catch (parseError) {
+        throw new Error('Failed to load KYC');
+      }
+    }
+
+    // Check if response has content
+    const text = await response.text();
+    if (!text || text.trim() === '') {
+      return null;
+    }
+
+    try {
+      return JSON.parse(text);
+    } catch (parseError) {
+      console.error('Failed to parse KYC response:', parseError);
+      return null;
+    }
+  },
+
+  async getKycDetails(accessToken: string, id: string): Promise<KycSubmission> {
+    const response = await fetch(`${API_URL}/kyc/${id}`, {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.message || 'Failed to load KYC details');
+    }
+
+    return response.json();
+  },
+
+  async updateKyc(
+    accessToken: string,
+    id: string,
+    data: Partial<SubmitKycData>,
+  ): Promise<KycSubmission> {
+    const response = await fetch(`${API_URL}/kyc/${id}`, {
+      method: 'PATCH',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
+        Authorization: `Bearer ${accessToken}`,
       },
-      body: JSON.stringify({ reason }),
+      body: JSON.stringify(data),
     });
-    return handleResponse(response);
-  },
 
-  async requestResubmission(token: string, submissionId: string, reason: string) {
-    const response = await fetch(`${API_BASE_URL}/admin/kyc/${submissionId}/request-resubmission`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({ reason }),
-    });
-    return handleResponse(response);
-  },
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.message || 'Failed to update KYC');
+    }
 
-  async getKYCStats(token: string) {
-    const response = await fetch(`${API_BASE_URL}/admin/kyc/stats`, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    });
-    return handleResponse(response);
+    return response.json();
   },
 };
