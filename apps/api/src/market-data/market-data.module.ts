@@ -7,6 +7,7 @@ import { MarketDataEngineService } from './market-data-engine.service';
 import { InstrumentConfigService } from './instrument-config.service';
 import { UnifiedMarketDataService } from './unified-market-data.service';
 import { TwelveDataProvider } from './providers/twelvedata/twelve-data.provider';
+import { MarketDataManagerService } from './market-data-manager.service';
 
 @Module({
   imports: [ConfigModule],
@@ -18,6 +19,7 @@ import { TwelveDataProvider } from './providers/twelvedata/twelve-data.provider'
     InstrumentConfigService,
     UnifiedMarketDataService,
     TwelveDataProvider,
+    MarketDataManagerService,
   ],
   exports: [
     MarketPriceService,
@@ -26,6 +28,7 @@ import { TwelveDataProvider } from './providers/twelvedata/twelve-data.provider'
     InstrumentConfigService,
     UnifiedMarketDataService,
     TwelveDataProvider,
+    MarketDataManagerService,
   ],
 })
 export class MarketDataModule {

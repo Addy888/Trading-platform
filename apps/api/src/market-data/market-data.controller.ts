@@ -1,7 +1,9 @@
 import { Controller, Get, Param, Query, UseGuards, Post, Body } from '@nestjs/common';
+import { SkipThrottle } from '@nestjs/throttler';
 import { SimulatedMarketEngineService } from './simulated-market-engine.service';
 import { UnifiedMarketDataService } from './unified-market-data.service';
 import { TwelveDataProvider } from './providers/twelvedata/twelve-data.provider';
+import { MarketDataManagerService } from './market-data-manager.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { MarketDataSource } from './dto/normalized-tick.dto';
 
@@ -12,6 +14,11 @@ import { MarketDataSource } from './dto/normalized-tick.dto';
  * 
  * Day 2: Extended with unified market data endpoints (SIMULATED + LIVE)
  * Day 4: Added Twelve Data integration
+ * Day 7 MVP: Integrated MarketDataManagerService to prevent quota exhaustion
+ * 
+ * Note: Twelve Data endpoints skip global throttling because the manager service
+ * has its own quota tracking, caching (30s for quotes, 5min for candles), 
+ * request deduplication, and circuit breaker protection
  */
 @Controller('market')
 export class MarketDataController {
@@ -19,6 +26,7 @@ export class MarketDataController {
     private readonly marketEngine: SimulatedMarketEngineService,
     private readonly unifiedMarketData: UnifiedMarketDataService,
     private readonly twelveData: TwelveDataProvider,
+    private readonly marketDataManager: MarketDataManagerService,
   ) {}
 
   /**
@@ -221,28 +229,41 @@ export class MarketDataController {
 
   /**
    * DAY 4: Get Twelve Data provider status
+   * DAY 7: Now returns MarketDataManager status with quota tracking
    * 
    * GET /api/market/twelvedata/status
+   * 
+   * Skip throttle: Manager handles all rate limiting internally
    */
   @Get('twelvedata/status')
   @UseGuards(JwtAuthGuard)
+  @SkipThrottle()
   getTwelveDataStatus() {
-    return this.twelveData.getStatus();
+    return this.marketDataManager.getProviderStatus();
   }
 
   /**
    * DAY 4: Get real-time quote from Twelve Data
+   * DAY 7: Now uses MarketDataManager with caching and quota tracking
    * 
-   * GET /api/market/twelvedata/quote/:symbol
+   * GET /api/market/twelvedata/quote/:symbol?mode=LIVE
+   * 
+   * Skip throttle: Manager has request deduplication + 30s cache + quota tracking
    */
   @Get('twelvedata/quote/:symbol')
   @UseGuards(JwtAuthGuard)
-  async getTwelveDataQuote(@Param('symbol') symbol: string) {
+  @SkipThrottle()
+  async getTwelveDataQuote(
+    @Param('symbol') symbol: string,
+    @Query('mode') mode?: string,
+  ) {
     try {
-      const quote = await this.twelveData.getQuote(symbol);
+      const executionMode = (mode?.toUpperCase() === 'SIMULATED' ? 'SIMULATED' : 'LIVE') as 'LIVE' | 'SIMULATED';
+      const quote = await this.marketDataManager.getQuote(symbol, executionMode);
       return {
         success: true,
         symbol,
+        mode: executionMode,
         quote,
         timestamp: new Date(),
       };
@@ -258,24 +279,31 @@ export class MarketDataController {
 
   /**
    * DAY 4: Get historical candles from Twelve Data
+   * DAY 7: Now uses MarketDataManager with caching (5min TTL) and quota tracking
    * 
-   * GET /api/market/twelvedata/candles/:symbol?interval=1h&outputsize=100
+   * GET /api/market/twelvedata/candles/:symbol?interval=1h&outputsize=100&mode=LIVE
+   * 
+   * Skip throttle: Manager has request deduplication + 5min cache + quota tracking
    */
   @Get('twelvedata/candles/:symbol')
   @UseGuards(JwtAuthGuard)
+  @SkipThrottle()
   async getTwelveDataCandles(
     @Param('symbol') symbol: string,
     @Query('interval') interval: string = '1h',
     @Query('outputsize') outputsizeStr: string = '100',
+    @Query('mode') mode?: string,
   ) {
     try {
       const outputsize = parseInt(outputsizeStr, 10);
-      const candles = await this.twelveData.getTimeSeries(symbol, interval, outputsize);
+      const executionMode = (mode?.toUpperCase() === 'SIMULATED' ? 'SIMULATED' : 'LIVE') as 'LIVE' | 'SIMULATED';
+      const candles = await this.marketDataManager.getCandles(symbol, interval, outputsize, executionMode);
       
       return {
         success: true,
         symbol,
         interval,
+        mode: executionMode,
         candles,
         count: candles.length,
         timestamp: new Date(),

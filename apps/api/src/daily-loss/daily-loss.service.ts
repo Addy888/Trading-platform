@@ -96,9 +96,11 @@ export class DailyLossService {
     });
 
     if (!snapshot) {
-      this.logger.warn(
-        `No rule snapshot found for account ${accountId}`,
+      this.logger.error(
+        `⚠️ CRITICAL: No rule snapshot found for account ${accountId}. ` +
+        `Risk rules cannot be enforced. Account may need snapshot backfill.`
       );
+      // Return null to trigger validation failure upstream
       return null;
     }
 

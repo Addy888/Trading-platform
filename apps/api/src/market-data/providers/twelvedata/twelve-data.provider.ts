@@ -113,6 +113,12 @@ export class TwelveDataProvider implements OnModuleDestroy {
   // Concurrent request deduplication
   private pendingQuoteRequests: Map<string, Promise<TwelveDataQuote>> = new Map();
   
+  // Circuit breaker for rate limiting
+  private circuitBreakerTripped = false;
+  private circuitBreakerResetAt: number | null = null;
+  private readonly circuitBreakerCooldownMs = 60000; // 60 seconds cooldown
+  private rateLimitRetryAfter: number | null = null;
+  
   // Statistics
   private stats = {
     restRequests: 0,
@@ -122,6 +128,8 @@ export class TwelveDataProvider implements OnModuleDestroy {
     lastSuccessfulUpdate: null as Date | null,
     cacheHits: 0,
     cacheMisses: 0,
+    rateLimitHits: 0,
+    circuitBreakerTrips: 0,
   };
 
   constructor(
@@ -174,10 +182,25 @@ export class TwelveDataProvider implements OnModuleDestroy {
    * - Cache quotes for 30 seconds to respect rate limits (8 req/min)
    * - Deduplicate concurrent requests for same symbol
    * - Return cached data if fresh enough
+   * - Circuit breaker protection for rate limit errors
    */
   async getQuote(symbol: string): Promise<TwelveDataQuote> {
     if (!this.isConfigured()) {
       throw new Error('Twelve Data API key not configured');
+    }
+
+    // Check circuit breaker
+    if (this.circuitBreakerTripped) {
+      const now = Date.now();
+      if (this.circuitBreakerResetAt && now < this.circuitBreakerResetAt) {
+        const waitSeconds = Math.ceil((this.circuitBreakerResetAt - now) / 1000);
+        throw new Error(`Circuit breaker tripped. Retry after ${waitSeconds} seconds`);
+      } else {
+        // Reset circuit breaker
+        this.logger.log('Circuit breaker reset');
+        this.circuitBreakerTripped = false;
+        this.circuitBreakerResetAt = null;
+      }
     }
 
     // Check cache first
@@ -212,6 +235,13 @@ export class TwelveDataProvider implements OnModuleDestroy {
       this.quoteCache.set(symbol, { data, timestamp: Date.now() });
       
       return data;
+    } catch (error) {
+      // Check if rate limit error
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      if (errorMessage.includes('429') || errorMessage.includes('Rate limit')) {
+        this.handleRateLimitError();
+      }
+      throw error;
     } finally {
       // Remove from pending requests
       this.pendingQuoteRequests.delete(symbol);
@@ -227,6 +257,8 @@ export class TwelveDataProvider implements OnModuleDestroy {
     try {
       const url = `${this.baseUrl}/quote?symbol=${encodeURIComponent(symbol)}&apikey=${this.apiKey}`;
       
+      this.logger.debug(`Fetching quote from: ${this.baseUrl}/quote?symbol=${symbol}&apikey=***`);
+      
       const response = await fetch(url, {
         method: 'GET',
         headers: {
@@ -235,21 +267,40 @@ export class TwelveDataProvider implements OnModuleDestroy {
         signal: AbortSignal.timeout(10000), // 10s timeout
       });
 
+      const data = await response.json();
+      
+      this.logger.debug(`Response for ${symbol}: status=${response.status}, hasData=${!!data}`);
+
+      // Check for HTTP errors
       if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        // Extract Retry-After header if present
+        const retryAfter = response.headers.get('Retry-After');
+        if (retryAfter) {
+          const retrySeconds = parseInt(retryAfter, 10);
+          if (!isNaN(retrySeconds)) {
+            this.rateLimitRetryAfter = Date.now() + (retrySeconds * 1000);
+          }
+        }
+        
+        const errorMsg = data.message || data.error || response.statusText;
+        throw new Error(`HTTP ${response.status}: ${errorMsg}`);
       }
 
-      const data = await response.json();
-
-      // Check for API errors
+      // Check for API errors (Twelve Data returns 200 with error status)
       if (data.status === 'error') {
-        throw new Error(data.message || 'Unknown API error');
+        throw new Error(data.message || data.code || 'Unknown API error');
       }
 
       // Check for rate limit
-      if (data.code === 429) {
+      if (data.code === 429 || response.status === 429) {
+        this.stats.rateLimitHits++;
         this.logger.warn('⚠️  Rate limit exceeded - please reduce request frequency');
         throw new Error('Rate limit exceeded');
+      }
+
+      // Verify required fields exist
+      if (!data.symbol) {
+        throw new Error(`Invalid response format: missing symbol field`);
       }
 
       this.stats.lastSuccessfulUpdate = new Date();
@@ -257,9 +308,32 @@ export class TwelveDataProvider implements OnModuleDestroy {
       return data;
     } catch (error) {
       this.stats.restErrors++;
-      this.logger.error(`Failed to fetch quote for ${symbol}: ${(error as Error).message}`);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      this.logger.error(`Failed to fetch quote for ${symbol}: ${errorMessage}`);
       throw error;
     }
+  }
+
+  /**
+   * Handle rate limit error by tripping circuit breaker
+   */
+  private handleRateLimitError(): void {
+    this.stats.rateLimitHits++;
+    this.stats.circuitBreakerTrips++;
+    this.circuitBreakerTripped = true;
+    
+    // Use Retry-After if available, otherwise default cooldown
+    const cooldownMs = this.rateLimitRetryAfter
+      ? Math.max(this.rateLimitRetryAfter - Date.now(), this.circuitBreakerCooldownMs)
+      : this.circuitBreakerCooldownMs;
+    
+    this.circuitBreakerResetAt = Date.now() + cooldownMs;
+    
+    this.logger.warn(
+      `🚨 Circuit breaker TRIPPED due to rate limiting. ` +
+      `Cooldown: ${Math.ceil(cooldownMs / 1000)}s. ` +
+      `Reset at: ${new Date(this.circuitBreakerResetAt).toISOString()}`
+    );
   }
 
   /**
@@ -286,6 +360,8 @@ export class TwelveDataProvider implements OnModuleDestroy {
     try {
       const url = `${this.baseUrl}/time_series?symbol=${encodeURIComponent(symbol)}&interval=${interval}&outputsize=${outputsize}&apikey=${this.apiKey}`;
       
+      this.logger.debug(`Fetching time series from: ${this.baseUrl}/time_series?symbol=${symbol}&interval=${interval}&outputsize=${outputsize}&apikey=***`);
+      
       const response = await fetch(url, {
         method: 'GET',
         headers: {
@@ -294,25 +370,29 @@ export class TwelveDataProvider implements OnModuleDestroy {
         signal: AbortSignal.timeout(15000), // 15s timeout
       });
 
+      const data: TwelveDataTimeSeriesResponse = await response.json();
+      
+      this.logger.debug(`Response for ${symbol} time series: status=${response.status}, hasValues=${!!(data as any).values}`);
+
+      // Check for HTTP errors
       if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        const errorMsg = (data as any).message || (data as any).error || response.statusText;
+        throw new Error(`HTTP ${response.status}: ${errorMsg}`);
       }
 
-      const data: TwelveDataTimeSeriesResponse = await response.json();
-
-      // Check for API errors
+      // Check for API errors (Twelve Data returns 200 with error status)
       if ((data as any).status === 'error') {
-        throw new Error((data as any).message || 'Unknown API error');
+        throw new Error((data as any).message || (data as any).code || 'Unknown API error');
       }
 
       // Check for rate limit
-      if ((data as any).code === 429) {
+      if ((data as any).code === 429 || response.status === 429) {
         this.logger.warn('Rate limit exceeded');
         throw new Error('Rate limit exceeded');
       }
 
       if (!data.values || data.values.length === 0) {
-        this.logger.warn(`No time series data for ${symbol}`);
+        this.logger.warn(`No time series data for ${symbol} with interval ${interval}`);
         return [];
       }
 
@@ -330,10 +410,12 @@ export class TwelveDataProvider implements OnModuleDestroy {
       candles.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
 
       this.stats.lastSuccessfulUpdate = new Date();
+      this.logger.debug(`Fetched ${candles.length} candles for ${symbol}`);
       return candles;
     } catch (error) {
       this.stats.restErrors++;
-      this.logger.error(`Failed to fetch time series for ${symbol}: ${(error as Error).message}`);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      this.logger.error(`Failed to fetch time series for ${symbol}: ${errorMessage}`);
       throw error;
     }
   }

@@ -1,5 +1,6 @@
-import { Controller, Get, Param, Query, UseGuards, Request } from '@nestjs/common';
+import { Controller, Get, Param, Query, UseGuards, Request, Post } from '@nestjs/common';
 import { TradingAccountsService } from './trading-accounts.service';
+import { RuleSnapshotBackfillService } from './rule-snapshot-backfill.service';
 import { AccountsQueryDto } from './dto/accounts-query.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -40,6 +41,7 @@ export class AdminTradingAccountsController {
   constructor(
     private readonly tradingAccountsService: TradingAccountsService,
     private readonly challengeProgressService: ChallengeProgressService,
+    private readonly ruleSnapshotBackfill: RuleSnapshotBackfillService,
   ) {}
 
   @Get()
@@ -55,5 +57,20 @@ export class AdminTradingAccountsController {
   @Get(':id/progress')
   async getAccountProgressAdmin(@Param('id') id: string) {
     return this.challengeProgressService.getChallengeProgress(id);
+  }
+
+  @Get('snapshots/missing')
+  async findAccountsMissingSnapshots() {
+    return this.ruleSnapshotBackfill.findAccountsMissingSnapshots();
+  }
+
+  @Post('snapshots/backfill-all')
+  async backfillAllSnapshots() {
+    return this.ruleSnapshotBackfill.backfillAllMissingSnapshots();
+  }
+
+  @Post(':id/snapshots/backfill')
+  async backfillAccountSnapshot(@Param('id') id: string) {
+    return this.ruleSnapshotBackfill.backfillAccountSnapshot(id);
   }
 }
