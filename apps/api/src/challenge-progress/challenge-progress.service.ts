@@ -2,6 +2,10 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { RuleType, TradingAccountStatus } from '@prisma/client';
 import Decimal from 'decimal.js';
+import { DailyLossService } from '../daily-loss/daily-loss.service';
+import { MaxDrawdownService } from '../max-drawdown/max-drawdown.service';
+import { RiskCalculationService } from '../risk-engine/risk-calculation.service';
+import { FinancialCalculations } from '../common/utils/financial-calculations.util';
 
 export interface ProfitTargetProgress {
   requiredProfit: string;
@@ -58,7 +62,12 @@ export interface ChallengeProgress {
  */
 @Injectable()
 export class ChallengeProgressService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly dailyLossService: DailyLossService,
+    private readonly maxDrawdownService: MaxDrawdownService,
+    private readonly riskCalculation: RiskCalculationService,
+  ) {}
 
   /**
    * Get complete challenge progress for an account
@@ -118,20 +127,16 @@ export class ChallengeProgressService {
           break;
 
         case RuleType.MAX_DRAWDOWN:
-          result.rules.maxDrawdown = this.calculateMaxDrawdownProgress(
-            account.initialBalance,
-            account.equity,
-            rule.value,
-            rule.isPercentage,
+          // Day 6: Use new MaxDrawdownService for precise calculation
+          result.rules.maxDrawdown = await this.calculateMaxDrawdownProgressV2(
+            tradingAccountId,
           );
           break;
 
         case RuleType.DAILY_LOSS:
-          result.rules.dailyLoss = await this.calculateDailyLossProgress(
+          // Day 5: Use new DailyLossService for precise calculation
+          result.rules.dailyLoss = await this.calculateDailyLossProgressV2(
             tradingAccountId,
-            account.initialBalance,
-            rule.value,
-            rule.isPercentage,
           );
           break;
 
@@ -223,8 +228,79 @@ export class ChallengeProgressService {
   }
 
   /**
-   * Calculate Daily Loss Progress
+   * Calculate Maximum Drawdown Progress (Day 6 Implementation)
+   * Uses MaxDrawdownService for precise evaluation with:
+   * - Static/Trailing drawdown types
+   * - Balance/Equity basis
+   * - HWM tracking
+   */
+  private async calculateMaxDrawdownProgressV2(
+    tradingAccountId: string,
+  ): Promise<MaxDrawdownProgress> {
+    try {
+      const evaluation = await this.maxDrawdownService.evaluateMaxDrawdown(
+        tradingAccountId,
+      );
+
+      return {
+        maximumAllowedLoss: FinancialCalculations.formatMoney(evaluation.maxDrawdownLimit),
+        currentDrawdown: FinancialCalculations.formatMoney(evaluation.currentDrawdown),
+        remainingLossAllowance: FinancialCalculations.formatMoney(
+          FinancialCalculations.max(evaluation.remainingDrawdownBuffer, new Decimal(0)),
+        ),
+        usagePercentage: FinancialCalculations.formatPercentage(evaluation.usagePercentage),
+        breached: evaluation.breached,
+      };
+    } catch (error) {
+      // If max drawdown evaluation fails, return safe defaults
+      return {
+        maximumAllowedLoss: '0.00',
+        currentDrawdown: '0.00',
+        remainingLossAllowance: '0.00',
+        usagePercentage: '0.00',
+        breached: false,
+      };
+    }
+  }
+
+  /**
+   * Calculate Daily Loss Progress (Day 5 Implementation)
+   * Uses DailyLossService for precise evaluation
+   */
+  private async calculateDailyLossProgressV2(
+    tradingAccountId: string,
+  ): Promise<DailyLossProgress> {
+    try {
+      const evaluation = await this.dailyLossService.evaluateDailyLoss(
+        tradingAccountId,
+      );
+
+      return {
+        dailyLossLimit: FinancialCalculations.formatMoney(evaluation.dailyLossLimit),
+        currentDailyLoss: FinancialCalculations.formatMoney(evaluation.dailyLoss),
+        remainingDailyLoss: FinancialCalculations.formatMoney(
+          FinancialCalculations.max(evaluation.remainingDailyLossBudget, new Decimal(0)),
+        ),
+        usagePercentage: FinancialCalculations.formatPercentage(evaluation.usagePercentage),
+        breached: evaluation.breached,
+      };
+    } catch (error) {
+      // If daily loss evaluation fails, return safe defaults
+      return {
+        dailyLossLimit: '0.00',
+        currentDailyLoss: '0.00',
+        remainingDailyLoss: '0.00',
+        usagePercentage: '0.00',
+        breached: false,
+      };
+    }
+  }
+
+  /**
+   * Calculate Daily Loss Progress (Legacy)
    * Uses server timezone for day boundaries
+   * 
+   * @deprecated Use calculateDailyLossProgressV2 instead
    */
   private async calculateDailyLossProgress(
     tradingAccountId: string,
@@ -318,21 +394,21 @@ export class ChallengeProgressService {
     const progressItems: number[] = [];
 
     if (rules.profitTarget) {
-      progressItems.push(parseFloat(rules.profitTarget.progressPercentage));
+      progressItems.push(new Decimal(rules.profitTarget.progressPercentage).toNumber());
     }
 
     if (rules.minimumTradingDays) {
-      progressItems.push(parseFloat(rules.minimumTradingDays.progressPercentage));
+      progressItems.push(new Decimal(rules.minimumTradingDays.progressPercentage).toNumber());
     }
 
     // For drawdown and daily loss, we want to show how much allowance is left
     // So we invert the usage percentage
     if (rules.maxDrawdown && !rules.maxDrawdown.breached) {
-      progressItems.push(100 - parseFloat(rules.maxDrawdown.usagePercentage));
+      progressItems.push(100 - new Decimal(rules.maxDrawdown.usagePercentage).toNumber());
     }
 
     if (rules.dailyLoss && !rules.dailyLoss.breached) {
-      progressItems.push(100 - parseFloat(rules.dailyLoss.usagePercentage));
+      progressItems.push(100 - new Decimal(rules.dailyLoss.usagePercentage).toNumber());
     }
 
     if (progressItems.length === 0) {

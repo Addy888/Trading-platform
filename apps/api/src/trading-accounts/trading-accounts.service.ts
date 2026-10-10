@@ -1,10 +1,14 @@
 import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { RuleSnapshotService } from './rule-snapshot.service';
 import { AccountsQueryDto } from './dto/accounts-query.dto';
 
 @Injectable()
 export class TradingAccountsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private ruleSnapshot: RuleSnapshotService,
+  ) {}
 
   async findUserAccounts(userId: string) {
     return this.prisma.tradingAccount.findMany({
@@ -32,6 +36,7 @@ export class TradingAccountsService {
           },
         },
         order: true,
+        ruleSnapshot: true,
       },
     });
 
@@ -119,6 +124,7 @@ export class TradingAccountsService {
           },
         },
         order: true,
+        ruleSnapshot: true,
       },
     });
 

@@ -21,6 +21,11 @@ export interface InstrumentConfig {
   pipSize: Decimal;
   precision: number;
   marginRequirement: Decimal; // Percentage of position value required as margin
+  // Day 13: SL/TP distance validation
+  minSlDistance?: number; // Minimum SL distance in pips
+  maxSlDistance?: number; // Maximum SL distance in pips
+  minTpDistance?: number; // Minimum TP distance in pips
+  maxTpDistance?: number; // Maximum TP distance in pips
 }
 
 /**
@@ -60,6 +65,10 @@ export class InstrumentConfigService {
         pipSize: new Decimal(0.0001),
         precision: 5,
         marginRequirement: new Decimal(0.01), // 1% = 1:100 leverage
+        minSlDistance: 10,  // 10 pips minimum
+        maxSlDistance: 1000, // 1000 pips maximum
+        minTpDistance: 10,  // 10 pips minimum
+        maxTpDistance: 2000, // 2000 pips maximum
       },
       {
         symbol: 'GBPUSD',

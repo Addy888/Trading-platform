@@ -1,9 +1,13 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 
 @Injectable()
 export class AdminKYCService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private eventEmitter: EventEmitter2,
+  ) {}
 
   async getKYCSubmissions(
     page: number,
@@ -114,6 +118,16 @@ export class AdminKYCService {
   async approveKYC(id: string, adminId: string, notes?: string) {
     const submission = await this.prisma.kycSubmission.findUnique({
       where: { id },
+      include: {
+        user: {
+          select: {
+            id: true,
+            email: true,
+            firstName: true,
+            lastName: true,
+          },
+        },
+      },
     });
 
     if (!submission) {
@@ -124,7 +138,8 @@ export class AdminKYCService {
       throw new BadRequestException('Only pending KYC submissions can be approved');
     }
 
-    return this.prisma.kycSubmission.update({
+    // Update KYC status
+    const updated = await this.prisma.kycSubmission.update({
       where: { id },
       data: {
         status: 'APPROVED',
@@ -133,11 +148,46 @@ export class AdminKYCService {
         reviewNotes: notes,
       },
     });
+
+    // Create audit log
+    await this.prisma.auditLog.create({
+      data: {
+        actorId: adminId,
+        action: 'KYC_APPROVED',
+        entityType: 'KycSubmission',
+        entityId: id,
+        metadata: {
+          userId: submission.userId,
+          userEmail: submission.user.email,
+          reviewNotes: notes,
+        },
+      },
+    });
+
+    // Emit event for notification
+    this.eventEmitter.emit('kyc.approved', {
+      kycId: id,
+      userId: submission.userId,
+      reviewedBy: adminId,
+      reviewNotes: notes,
+    });
+
+    return updated;
   }
 
   async rejectKYC(id: string, adminId: string, reason: string) {
     const submission = await this.prisma.kycSubmission.findUnique({
       where: { id },
+      include: {
+        user: {
+          select: {
+            id: true,
+            email: true,
+            firstName: true,
+            lastName: true,
+          },
+        },
+      },
     });
 
     if (!submission) {
@@ -148,7 +198,8 @@ export class AdminKYCService {
       throw new BadRequestException('Only pending KYC submissions can be rejected');
     }
 
-    return this.prisma.kycSubmission.update({
+    // Update KYC status
+    const updated = await this.prisma.kycSubmission.update({
       where: { id },
       data: {
         status: 'REJECTED',
@@ -157,11 +208,46 @@ export class AdminKYCService {
         reviewNotes: reason,
       },
     });
+
+    // Create audit log
+    await this.prisma.auditLog.create({
+      data: {
+        actorId: adminId,
+        action: 'KYC_REJECTED',
+        entityType: 'KycSubmission',
+        entityId: id,
+        metadata: {
+          userId: submission.userId,
+          userEmail: submission.user.email,
+          reviewNotes: reason,
+        },
+      },
+    });
+
+    // Emit event for notification
+    this.eventEmitter.emit('kyc.rejected', {
+      kycId: id,
+      userId: submission.userId,
+      reviewedBy: adminId,
+      reviewNotes: reason,
+    });
+
+    return updated;
   }
 
   async requestResubmission(id: string, adminId: string, reason: string) {
     const submission = await this.prisma.kycSubmission.findUnique({
       where: { id },
+      include: {
+        user: {
+          select: {
+            id: true,
+            email: true,
+            firstName: true,
+            lastName: true,
+          },
+        },
+      },
     });
 
     if (!submission) {
@@ -174,7 +260,8 @@ export class AdminKYCService {
       );
     }
 
-    return this.prisma.kycSubmission.update({
+    // Update KYC status
+    const updated = await this.prisma.kycSubmission.update({
       where: { id },
       data: {
         status: 'RESUBMISSION_REQUESTED',
@@ -183,6 +270,31 @@ export class AdminKYCService {
         reviewNotes: reason,
       },
     });
+
+    // Create audit log
+    await this.prisma.auditLog.create({
+      data: {
+        actorId: adminId,
+        action: 'KYC_RESUBMISSION_REQUESTED',
+        entityType: 'KycSubmission',
+        entityId: id,
+        metadata: {
+          userId: submission.userId,
+          userEmail: submission.user.email,
+          reviewNotes: reason,
+        },
+      },
+    });
+
+    // Emit event for notification
+    this.eventEmitter.emit('kyc.resubmission_requested', {
+      kycId: id,
+      userId: submission.userId,
+      reviewedBy: adminId,
+      reviewNotes: reason,
+    });
+
+    return updated;
   }
 
   async getKYCStats() {

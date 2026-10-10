@@ -1,6 +1,8 @@
 import { Injectable, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { AccountSnapshotsService } from '../account-snapshots/account-snapshots.service';
+import { AccountStateService } from '../trading-accounts/account-state.service';
+import { RuleSnapshotService } from '../trading-accounts/rule-snapshot.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { OrdersQueryDto } from './dto/orders-query.dto';
@@ -12,6 +14,8 @@ export class OrdersService {
   constructor(
     private prisma: PrismaService,
     private accountSnapshots: AccountSnapshotsService,
+    private accountState: AccountStateService,
+    private ruleSnapshot: RuleSnapshotService,
     private eventEmitter: EventEmitter2,
   ) {}
 
@@ -307,6 +311,20 @@ export class OrdersService {
           startedAt: new Date(),
         },
       });
+
+      // Initialize account state (HWM, daily tracking, etc.)
+      await this.accountState.initializeAccountState(
+        tradingAccount.id,
+        new Decimal(tradingAccount.initialBalance),
+        tx,
+      );
+
+      // Create immutable rule snapshot
+      await this.ruleSnapshot.createRuleSnapshot(
+        tradingAccount.id,
+        order.challengePlan.ruleSetId,
+        tx,
+      );
 
       // Create initial snapshot
       await this.accountSnapshots.createSnapshot(

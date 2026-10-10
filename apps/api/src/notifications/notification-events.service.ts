@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { NotificationsService } from './notifications.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { TradingAccountStatus } from '@prisma/client';
+import { TradingAccountStatus, RuleType } from '@prisma/client';
 
 /**
  * Notification Events Service
@@ -10,6 +10,8 @@ import { TradingAccountStatus } from '@prisma/client';
  * Listens to application events and creates notifications.
  * 
  * This service integrates with existing Day 8 events.
+ * 
+ * DAY 20: Added risk warning event handlers
  */
 @Injectable()
 export class NotificationEventsService {
@@ -214,6 +216,144 @@ export class NotificationEventsService {
     } catch (error) {
       this.logger.error(
         `Error handling payment.status.changed: ${(error as Error).message}`,
+      );
+    }
+  }
+
+  /**
+   * DAY 20: Handle risk warning detected event
+   * 
+   * Triggered when risk metrics approach configured limits.
+   * Creates appropriate notification based on warning level and rule type.
+   */
+  @OnEvent('risk.warning.detected')
+  async handleRiskWarningDetected(payload: {
+    accountId: string;
+    warning: any;
+    calculation: any;
+  }) {
+    try {
+      const { accountId, warning } = payload;
+
+      // Get account to find userId and accountNumber
+      const account = await this.prisma.tradingAccount.findUnique({
+        where: { id: accountId },
+        select: {
+          id: true,
+          userId: true,
+          accountNumber: true,
+        },
+      });
+
+      if (!account) return;
+
+      const usagePercentage = warning.usagePercentage.toFixed(1);
+      const level = warning.warningLevel;
+
+      // Create notification based on rule type
+      if (warning.ruleType === RuleType.DAILY_LOSS) {
+        await this.notificationsService.notifyDailyLossWarning(
+          account.userId,
+          account.accountNumber,
+          level,
+          warning.message,
+          usagePercentage,
+        );
+      } else if (warning.ruleType === RuleType.MAX_DRAWDOWN) {
+        await this.notificationsService.notifyDrawdownWarning(
+          account.userId,
+          account.accountNumber,
+          level,
+          warning.message,
+          usagePercentage,
+        );
+      } else if (warning.ruleType === RuleType.PROFIT_TARGET) {
+        await this.notificationsService.notifyProfitTargetApproaching(
+          account.userId,
+          account.accountNumber,
+          usagePercentage,
+        );
+      }
+
+      this.logger.debug(
+        `Risk warning notification created for account ${account.accountNumber}: ${warning.ruleType} ${level}`,
+      );
+    } catch (error) {
+      this.logger.error(
+        `Error handling risk.warning.detected: ${(error as Error).message}`,
+      );
+    }
+  }
+
+  /**
+   * DAY 20: Handle daily reset event
+   * 
+   * Triggered when daily reset is performed.
+   * Creates notification informing user of reset.
+   */
+  @OnEvent('daily.reset.completed')
+  async handleDailyResetCompleted(payload: {
+    accountId: string;
+    timezone: string;
+  }) {
+    try {
+      const { accountId, timezone } = payload;
+
+      // Get account to find userId and accountNumber
+      const account = await this.prisma.tradingAccount.findUnique({
+        where: { id: accountId },
+        select: {
+          id: true,
+          userId: true,
+          accountNumber: true,
+        },
+      });
+
+      if (!account) return;
+
+      await this.notificationsService.notifyDailyReset(
+        account.userId,
+        account.accountNumber,
+        timezone,
+      );
+
+      this.logger.debug(
+        `Daily reset notification created for account ${account.accountNumber}`,
+      );
+    } catch (error) {
+      this.logger.error(
+        `Error handling daily.reset.completed: ${(error as Error).message}`,
+      );
+    }
+  }
+
+  /**
+   * DAY 20: Handle order rejected event
+   * 
+   * Triggered when order fails risk validation.
+   * Creates high-priority notification informing user.
+   */
+  @OnEvent('order.rejected')
+  async handleOrderRejected(payload: {
+    userId: string;
+    symbol: string;
+    reason: string;
+  }) {
+    try {
+      const { userId, symbol, reason } = payload;
+
+      await this.notificationsService.notifyOrderRejected(
+        userId,
+        symbol,
+        reason,
+      );
+
+      this.logger.debug(
+        `Order rejected notification created for user ${userId}: ${symbol}`,
+      );
+    } catch (error) {
+      this.logger.error(
+        `Error handling order.rejected: ${(error as Error).message}`,
       );
     }
   }

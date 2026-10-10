@@ -8,20 +8,58 @@ import { PrismaService } from '../prisma/prisma.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { RequestPayoutDto } from './dto/request-payout.dto';
 import { PayoutStatus, TradingAccountStatus } from '@prisma/client';
-import { Decimal } from 'decimal.js';
+import { FinancialCalculations } from '../common/utils/financial-calculations.util';
+import { DecimalInputValidation } from '../common/utils/decimal-input-validation.util';
+import Decimal from 'decimal.js';
+import { ConsistencyService } from '../risk-engine/consistency.service';
+import { MinTradingDaysService } from '../risk-engine/min-trading-days.service';
+import { KycGateService } from '../kyc/kyc-gate.service';
+import { PayoutEligibilityService } from './payout-eligibility.service';
+
 
 @Injectable()
 export class PayoutsService {
   constructor(
     private prisma: PrismaService,
     private eventEmitter: EventEmitter2,
+    private consistencyService: ConsistencyService,
+    private minTradingDays: MinTradingDaysService,
+    private kycGate: KycGateService,
+    private payoutEligibility: PayoutEligibilityService,
   ) {}
 
   async requestPayout(userId: string, requestPayoutDto: RequestPayoutDto) {
     const { tradingAccountId, amount, method, destination, notes } =
       requestPayoutDto;
 
-    // Verify account ownership and status
+    // Day 25: Use centralized Payout Eligibility Engine
+    const eligibilityResult = await this.payoutEligibility.evaluate({
+      userId,
+      tradingAccountId,
+      requestedAmount: amount,
+      method,
+      destination,
+    });
+
+    // Record eligibility evaluation in audit log
+    await this.payoutEligibility.recordEligibilityEvaluation(
+      userId,
+      eligibilityResult,
+      {
+        userId,
+        tradingAccountId,
+        requestedAmount: amount,
+        method,
+        destination,
+      },
+    );
+
+    // If not eligible, reject with detailed message
+    if (!eligibilityResult.eligible) {
+      throw new BadRequestException(eligibilityResult.safeMessage);
+    }
+
+    // Load account for payout creation
     const account = await this.prisma.tradingAccount.findUnique({
       where: { id: tradingAccountId },
       include: {
@@ -43,48 +81,6 @@ export class PayoutsService {
 
     if (!account) {
       throw new NotFoundException('Trading account not found');
-    }
-
-    if (account.userId !== userId) {
-      throw new ForbiddenException('Access denied');
-    }
-
-    // Check account status - only PASSED or ACTIVE accounts can request payouts
-    if (
-      account.status !== TradingAccountStatus.PASSED &&
-      account.status !== TradingAccountStatus.ACTIVE
-    ) {
-      throw new BadRequestException(
-        'Only passed or active accounts can request payouts',
-      );
-    }
-
-    // Check if account has sufficient profit
-    const profit = parseFloat(account.equity.toString()) - parseFloat(account.initialBalance.toString());
-    if (profit <= 0) {
-      throw new BadRequestException('Account has no profit to withdraw');
-    }
-
-    // Check if requested amount is valid
-    if (amount > profit) {
-      throw new BadRequestException(
-        `Requested amount exceeds available profit (${profit.toFixed(2)})`,
-      );
-    }
-
-    // Check for pending payout requests
-    const pendingPayout = await this.prisma.payout.findFirst({
-      where: {
-        userId,
-        tradingAccountId,
-        status: PayoutStatus.PENDING,
-      },
-    });
-
-    if (pendingPayout) {
-      throw new BadRequestException(
-        'You already have a pending payout request for this account',
-      );
     }
 
     // Create payout request
@@ -112,7 +108,66 @@ export class PayoutsService {
       },
     });
 
-    // Create audit log
+    // Day 21: Calculate and persist consistency for payout
+    try {
+      const consistencyResult = await this.consistencyService.calculateConsistency(
+        tradingAccountId,
+        payout.id,
+      );
+
+      // Create immutable audit event
+      await this.prisma.auditLog.create({
+        data: {
+          actorId: userId,
+          action: consistencyResult.passed ? 'PAYOUT_CONSISTENCY_PASSED' : 'PAYOUT_CONSISTENCY_FAILED',
+          entityType: 'Payout',
+          entityId: payout.id,
+          metadata: {
+            tradingAccountId,
+            accountNumber: account.accountNumber,
+            totalProfit: FinancialCalculations.formatMoney(consistencyResult.totalProfit),
+            highestProfitableDay: FinancialCalculations.formatMoney(consistencyResult.highestProfitableDay),
+            highestProfitableDayDate: consistencyResult.highestProfitableDayDate.toISOString(),
+            consistencyPercentage: consistencyResult.consistencyPercentage.toFixed(2),
+            requiredThreshold: consistencyResult.requiredThreshold?.toFixed(2) || null,
+            passed: consistencyResult.passed,
+            profitableDaysCount: consistencyResult.profitableDaysCount,
+            totalTradingDays: consistencyResult.totalTradingDays,
+          },
+        },
+      });
+
+      // If consistency check fails, add warning to notes (admin still decides)
+      if (!consistencyResult.passed && consistencyResult.requiredThreshold) {
+        const warningNote = `\n\n[System Warning] Consistency check: ${consistencyResult.consistencyPercentage.toFixed(2)}% exceeds threshold of ${consistencyResult.requiredThreshold.toFixed(2)}%. Manual review required.`;
+        await this.prisma.payout.update({
+          where: { id: payout.id },
+          data: {
+            notes: (notes || '') + warningNote,
+          },
+        });
+      }
+    } catch (error) {
+      // Consistency calculation failure should not block payout request
+      // Log error and continue
+      console.error('Consistency calculation failed:', error);
+      
+      await this.prisma.auditLog.create({
+        data: {
+          actorId: userId,
+          action: 'PAYOUT_CONSISTENCY_ERROR',
+          entityType: 'Payout',
+          entityId: payout.id,
+          metadata: {
+            tradingAccountId,
+            accountNumber: account.accountNumber,
+            error: (error as Error).message,
+          },
+        },
+      });
+    }
+
+    // Create audit log for payout request
     await this.prisma.auditLog.create({
       data: {
         actorId: userId,
@@ -124,6 +179,8 @@ export class PayoutsService {
           accountNumber: account.accountNumber,
           amount: amount.toString(),
           method: method || 'Bank Transfer',
+          eligibilityChecks: eligibilityResult.checks.length,
+          ruleSnapshotVersion: eligibilityResult.ruleSnapshotVersion,
         },
       },
     });
@@ -202,79 +259,32 @@ export class PayoutsService {
   }
 
   async checkPayoutEligibility(tradingAccountId: string, userId: string) {
-    const account = await this.prisma.tradingAccount.findUnique({
-      where: { id: tradingAccountId },
-      include: {
-        ruleSet: {
-          include: {
-            ruleSetRules: {
-              include: {
-                rule: true,
-              },
-            },
-          },
-        },
-      },
+    // Day 25: Use centralized Payout Eligibility Engine
+    const eligibilityResult = await this.payoutEligibility.evaluate({
+      userId,
+      tradingAccountId,
+      requestedAmount: 0, // For eligibility check, we check general eligibility
     });
 
-    if (!account) {
-      throw new NotFoundException('Trading account not found');
-    }
-
-    if (account.userId !== userId) {
-      throw new ForbiddenException('Access denied');
-    }
-
-    // Check if account status allows payouts
-    const statusEligible =
-      account.status === TradingAccountStatus.PASSED ||
-      account.status === TradingAccountStatus.ACTIVE;
-
-    // Calculate profit
-    const profit = parseFloat(account.equity.toString()) - parseFloat(account.initialBalance.toString());
-    const hasProfit = profit > 0;
-
-    // Check for pending payouts
-    const pendingPayout = await this.prisma.payout.findFirst({
-      where: {
-        userId,
-        tradingAccountId,
-        status: PayoutStatus.PENDING,
-      },
-    });
-
-    // Check minimum trading days if rule exists
-    const minTradingDaysRule = account.ruleSet.ruleSetRules.find(
-      (rsr) => rsr.rule.type === 'MIN_TRADING_DAYS',
-    );
-
-    let minTradingDaysMet = true;
-    if (minTradingDaysRule && account.startedAt) {
-      const daysSinceStart = Math.floor(
-        (Date.now() - account.startedAt.getTime()) / (1000 * 60 * 60 * 24),
-      );
-      minTradingDaysMet =
-        daysSinceStart >= parseFloat(minTradingDaysRule.rule.value.toString());
-    }
-
-    const eligible =
-      statusEligible &&
-      hasProfit &&
-      !pendingPayout &&
-      minTradingDaysMet;
+    // Extract details for response
+    const checks = eligibilityResult.checks.reduce((acc, check) => {
+      acc[check.checkName] = {
+        passed: check.passed,
+        required: check.required,
+        message: check.message,
+        details: check.details,
+      };
+      return acc;
+    }, {} as Record<string, any>);
 
     return {
-      eligible,
-      reasons: {
-        statusEligible,
-        hasProfit,
-        hasPendingPayout: !!pendingPayout,
-        minTradingDaysMet,
-      },
-      accountStatus: account.status,
-      availableProfit: profit > 0 ? profit.toFixed(2) : '0.00',
-      balance: account.currentBalance.toString(),
-      equity: account.equity.toString(),
+      eligible: eligibilityResult.eligible,
+      rejectionCode: eligibilityResult.rejectionCode,
+      message: eligibilityResult.safeMessage,
+      accountSnapshot: eligibilityResult.accountSnapshot,
+      checks,
+      evaluatedAt: eligibilityResult.evaluatedAt,
+      ruleSnapshotVersion: eligibilityResult.ruleSnapshotVersion,
     };
   }
 }

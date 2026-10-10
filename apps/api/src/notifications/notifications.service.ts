@@ -8,6 +8,8 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import Decimal from 'decimal.js';
+
 import {
   NotificationType,
   NotificationPriority,
@@ -141,9 +143,14 @@ export class NotificationsService {
       case NotificationType.ACCOUNT_CREATED:
       case NotificationType.ACCOUNT_PASSED:
       case NotificationType.ACCOUNT_BREACHED:
+      case NotificationType.DAILY_LOSS_WARNING:
+      case NotificationType.DRAWDOWN_WARNING:
+      case NotificationType.PROFIT_TARGET_APPROACHING:
+      case NotificationType.DAILY_RESET:
         return preferences.accountNotifications || preferences.challengeNotifications;
 
       case NotificationType.ORDER_CREATED:
+      case NotificationType.ORDER_REJECTED:
       case NotificationType.PAYMENT_PENDING:
       case NotificationType.PAYMENT_COMPLETED:
       case NotificationType.PAYMENT_REJECTED:
@@ -394,7 +401,8 @@ export class NotificationsService {
     exitPrice: string,
     realizedPnl: string,
   ) {
-    const pnlFormatted = parseFloat(realizedPnl) >= 0 ? `+${realizedPnl}` : realizedPnl;
+    const pnlDecimal = new Decimal(realizedPnl);
+    const pnlFormatted = pnlDecimal.greaterThanOrEqualTo(0) ? `+${realizedPnl}` : realizedPnl;
     
     return this.create({
       userId,
@@ -431,6 +439,108 @@ export class NotificationsService {
       title: 'Challenge Breached',
       message: `Account ${accountNumber} has breached challenge rules${reason ? `: ${reason}` : '.'}`,
       data: { accountNumber, reason },
+    });
+  }
+
+  /**
+   * DAY 20: Create notification for daily loss warning
+   */
+  async notifyDailyLossWarning(
+    userId: string,
+    accountNumber: string,
+    level: string,
+    message: string,
+    usagePercentage: string,
+  ) {
+    const priority = level === 'CRITICAL' 
+      ? NotificationPriority.CRITICAL 
+      : level === 'WARNING' 
+        ? NotificationPriority.HIGH 
+        : NotificationPriority.NORMAL;
+
+    return this.create({
+      userId,
+      type: NotificationType.DAILY_LOSS_WARNING,
+      priority,
+      title: 'Daily Loss Warning',
+      message,
+      data: { accountNumber, level, usagePercentage },
+    });
+  }
+
+  /**
+   * DAY 20: Create notification for drawdown warning
+   */
+  async notifyDrawdownWarning(
+    userId: string,
+    accountNumber: string,
+    level: string,
+    message: string,
+    usagePercentage: string,
+  ) {
+    const priority = level === 'CRITICAL' 
+      ? NotificationPriority.CRITICAL 
+      : level === 'WARNING' 
+        ? NotificationPriority.HIGH 
+        : NotificationPriority.NORMAL;
+
+    return this.create({
+      userId,
+      type: NotificationType.DRAWDOWN_WARNING,
+      priority,
+      title: 'Drawdown Warning',
+      message,
+      data: { accountNumber, level, usagePercentage },
+    });
+  }
+
+  /**
+   * DAY 20: Create notification for profit target approaching
+   */
+  async notifyProfitTargetApproaching(
+    userId: string,
+    accountNumber: string,
+    progressPercentage: string,
+  ) {
+    return this.create({
+      userId,
+      type: NotificationType.PROFIT_TARGET_APPROACHING,
+      priority: NotificationPriority.HIGH,
+      title: '🎯 Profit Target Approaching',
+      message: `Great work! Account ${accountNumber} is ${progressPercentage}% toward profit target.`,
+      data: { accountNumber, progressPercentage },
+    });
+  }
+
+  /**
+   * DAY 20: Create notification for daily reset
+   */
+  async notifyDailyReset(userId: string, accountNumber: string, timezone: string) {
+    return this.create({
+      userId,
+      type: NotificationType.DAILY_RESET,
+      priority: NotificationPriority.LOW,
+      title: 'Daily Reset Completed',
+      message: `Daily tracking reset for account ${accountNumber} (${timezone}).`,
+      data: { accountNumber, timezone },
+    });
+  }
+
+  /**
+   * DAY 20: Create notification for order rejected
+   */
+  async notifyOrderRejected(
+    userId: string,
+    symbol: string,
+    reason: string,
+  ) {
+    return this.create({
+      userId,
+      type: NotificationType.ORDER_REJECTED,
+      priority: NotificationPriority.HIGH,
+      title: 'Order Rejected',
+      message: `Order for ${symbol} was rejected: ${reason}`,
+      data: { symbol, reason },
     });
   }
 

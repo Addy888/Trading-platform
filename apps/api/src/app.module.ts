@@ -1,5 +1,7 @@
 import { Module } from '@nestjs/common';
 import { EventEmitterModule } from '@nestjs/event-emitter';
+import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
+import { APP_GUARD } from '@nestjs/core';
 import { HealthModule } from './health/health.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { AuthModule } from './auth/auth.module';
@@ -25,10 +27,18 @@ import { EmailModule } from './email/email.module';
 import { KycModule } from './kyc/kyc.module';
 import { PayoutsModule } from './payouts/payouts.module';
 import { SettingsModule } from './settings/settings.module';
+import { DailyLossModule } from './daily-loss/daily-loss.module';
+import { BrokerModule } from './broker/broker.module';
+import { BrokerOrderModule } from './broker-orders/broker-order.module';
 
 @Module({
   imports: [
     EventEmitterModule.forRoot(),
+    // Rate limiting configuration
+    ThrottlerModule.forRoot([{
+      ttl: parseInt(process.env.RATE_LIMIT_TTL || '60', 10) * 1000, // Convert to milliseconds
+      limit: parseInt(process.env.RATE_LIMIT_MAX || '100', 10),
+    }]),
     PrismaModule,
     HealthModule,
     AuthModule,
@@ -54,6 +64,16 @@ import { SettingsModule } from './settings/settings.module';
     KycModule,
     PayoutsModule,
     SettingsModule,
+    DailyLossModule,
+    BrokerModule,
+    BrokerOrderModule,
+  ],
+  providers: [
+    // Apply throttler guard globally
+    {
+      provide: APP_GUARD,
+      useClass: ThrottlerGuard,
+    },
   ],
 })
 export class AppModule {}

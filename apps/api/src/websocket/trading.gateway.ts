@@ -316,4 +316,52 @@ export class TradingGateway
       );
     }
   }
+
+  /**
+   * DAY 16: Listen to account.status.changed event
+   * 
+   * Broadcasts account status changes via WebSocket to:
+   * - Account-specific room (for user's client)
+   * - Admin room (for admin monitoring)
+   * 
+   * Triggered by RiskEvaluationService after successful breach/pass transaction.
+   */
+  @OnEvent('account.status.changed')
+  async handleAccountStatusChanged(payload: {
+    accountId: string;
+    previousStatus: string;
+    newStatus: string;
+    reason?: string;
+    calculation?: any;
+  }) {
+    try {
+      const { accountId, previousStatus, newStatus, reason } = payload;
+
+      this.logger.log(
+        `Broadcasting account status change: ${accountId} ` +
+        `${previousStatus} → ${newStatus}`,
+      );
+
+      // Prepare safe payload (no sensitive internal data)
+      const statusEvent: AccountStatusEvent = {
+        accountId,
+        accountNumber: '', // Will be filled from DB if needed
+        previousStatus,
+        newStatus,
+        reason: reason || undefined,
+        timestamp: new Date(),
+      };
+
+      // Emit to account room
+      this.emitAccountStatus(accountId, statusEvent);
+
+      this.logger.debug(
+        `Account status event emitted for ${accountId}: ${newStatus}`,
+      );
+    } catch (error) {
+      this.logger.error(
+        `Error handling account.status.changed: ${(error as Error).message}`,
+      );
+    }
+  }
 }

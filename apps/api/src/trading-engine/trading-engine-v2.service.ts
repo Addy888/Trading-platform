@@ -9,8 +9,11 @@ import { PrismaService } from '../prisma/prisma.service';
 import { MarketDataEngineService, MarketStatus } from '../market-data/market-data-engine.service';
 import { InstrumentConfigService } from '../market-data/instrument-config.service';
 import { MarginService } from './margin.service';
+import { BalanceEquityService } from './balance-equity.service';
 import { RuleEvaluatorService } from '../rule-evaluator/rule-evaluator.service';
+import { RiskEvaluationService } from '../risk-engine/risk-evaluation.service';
 import { AccountSnapshotsService } from '../account-snapshots/account-snapshots.service';
+import { MinTradingDaysService } from '../risk-engine/min-trading-days.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import {
   TradingAccountStatus,
@@ -18,6 +21,7 @@ import {
   TradeSide,
 } from '@prisma/client';
 import Decimal from 'decimal.js';
+import { FinancialCalculations } from '../common/utils/financial-calculations.util';
 
 /**
  * Error Codes
@@ -82,8 +86,11 @@ export class TradingEngineV2Service {
     private readonly marketData: MarketDataEngineService,
     private readonly instrumentConfig: InstrumentConfigService,
     private readonly marginService: MarginService,
+    private readonly balanceEquity: BalanceEquityService,
     private readonly ruleEvaluator: RuleEvaluatorService,
+    private readonly riskEvaluation: RiskEvaluationService,
     private readonly accountSnapshots: AccountSnapshotsService,
+    private readonly minTradingDays: MinTradingDaysService,
     private readonly eventEmitter: EventEmitter2,
   ) {}
 
@@ -224,18 +231,22 @@ export class TradingEngineV2Service {
         },
       });
 
-      // 12. Recalculate account equity
-      const equity = await this.calculateAccountEquity(tradingAccountId, tx);
-      await tx.tradingAccount.update({
-        where: { id: tradingAccountId },
-        data: { equity },
-      });
+      // 11a. Record trading day (Day 22)
+      await this.minTradingDays.recordTradingDay(
+        tradingAccountId,
+        trade.openedAt,
+        tx,
+      );
 
-      // 13. Calculate P&L for snapshot
-      const { realizedPnl, unrealizedPnl } = await this.calculateAccountPnl(
+      // 12. Recalculate equity and update HWM
+      const { equity, hwmUpdated, hwm } = await this.balanceEquity.updateFinancialStateOnPriceChange(
         tradingAccountId,
         tx,
       );
+
+      // 13. Calculate P&L for snapshot
+      const realizedPnl = await this.balanceEquity.calculateTotalRealizedPnl(tradingAccountId, tx);
+      const unrealizedPnl = await this.balanceEquity.calculateTotalUnrealizedPnl(tradingAccountId, tx);
 
       // 14. Create snapshot
       await this.accountSnapshots.createSnapshot(
@@ -247,16 +258,23 @@ export class TradingEngineV2Service {
         tx,
       );
 
-      // 15. Evaluate rules
-      const evaluation = await this.ruleEvaluator.evaluateRules(
+      // 15. Evaluate rules using Day 7 central risk engine
+      const evaluation = await this.riskEvaluation.evaluateAccount(
         tradingAccountId,
-        equity,
+        {
+          type: 'TRADE_OPEN',
+          triggeredBy: userId,
+          metadata: {
+            tradeId: trade.id,
+            symbol: trade.symbol,
+            side: trade.side,
+            volume: trade.volume.toString(),
+          },
+        },
       );
-      await this.ruleEvaluator.updateAccountStatus(
-        tradingAccountId,
-        evaluation,
-        userId,
-      );
+
+      // 16. Emit post-evaluation events (after successful transaction)
+      this.riskEvaluation.emitPostEvaluationEvents(evaluation);
 
       // 16. Create audit log
       await tx.auditLog.create({
@@ -274,6 +292,9 @@ export class TradingEngineV2Service {
             executionType: dto.side === TradeSide.BUY ? 'ASK' : 'BID',
             leverage,
             requiredMargin: marginValidation.requiredMargin,
+            equity: FinancialCalculations.formatMoney(equity),
+            hwmUpdated,
+            hwm: FinancialCalculations.formatMoney(hwm),
           },
         },
       });
@@ -354,22 +375,17 @@ export class TradingEngineV2Service {
         exitPrice = ask;
       }
 
-      // 8. Calculate realized P&L
+      // 8. Calculate realized P&L using BalanceEquityService
       const instrument = this.instrumentConfig.getInstrument(trade.symbol);
       const contractMultiplier = instrument?.contractMultiplier || 1;
 
-      let realizedPnl: Decimal;
-      if (trade.side === TradeSide.BUY) {
-        realizedPnl = exitPrice
-          .minus(trade.entryPrice)
-          .times(trade.volume)
-          .times(contractMultiplier);
-      } else {
-        realizedPnl = trade.entryPrice
-          .minus(exitPrice)
-          .times(trade.volume)
-          .times(contractMultiplier);
-      }
+      const realizedPnl = this.balanceEquity.calculatePositionRealizedPnl(
+        trade.side,
+        new Decimal(trade.entryPrice),
+        exitPrice,
+        new Decimal(trade.volume),
+        contractMultiplier,
+      );
 
       // 9. Update trade
       const closedTrade = await tx.trade.update({
@@ -382,48 +398,51 @@ export class TradingEngineV2Service {
         },
       });
 
-      // 10. Update account balance
-      const newBalance = account.currentBalance.plus(realizedPnl);
-      await tx.tradingAccount.update({
-        where: { id: tradingAccountId },
-        data: { currentBalance: newBalance },
-      });
+      // 10-13. Update complete financial state (balance, equity, HWM, daily P&L)
+      const financialState = await this.balanceEquity.updateFinancialStateOnClose(
+        tradingAccountId,
+        realizedPnl,
+        tx,
+      );
 
-      // 11. Recalculate equity
-      const equity = await this.calculateAccountEquity(tradingAccountId, tx);
-      await tx.tradingAccount.update({
-        where: { id: tradingAccountId },
-        data: { equity },
-      });
+      // 14. Calculate P&L for snapshot
+      const totalRealizedPnl = await this.balanceEquity.calculateTotalRealizedPnl(
+        tradingAccountId,
+        tx,
+      );
+      const totalUnrealizedPnl = await this.balanceEquity.calculateTotalUnrealizedPnl(
+        tradingAccountId,
+        tx,
+      );
 
-      // 12. Calculate P&L for snapshot
-      const {
-        realizedPnl: totalRealizedPnl,
-        unrealizedPnl: totalUnrealizedPnl,
-      } = await this.calculateAccountPnl(tradingAccountId, tx);
-
-      // 13. Create snapshot
+      // 15. Create snapshot
       await this.accountSnapshots.createSnapshot(
         tradingAccountId,
-        newBalance,
-        equity,
+        financialState.balance,
+        financialState.equity,
         totalRealizedPnl,
         totalUnrealizedPnl,
         tx,
       );
 
-      // 14. Evaluate rules
-      const evaluation = await this.ruleEvaluator.evaluateRules(
+      // 16. Evaluate rules using Day 7 central risk engine
+      const evaluation = await this.riskEvaluation.evaluateAccount(
         tradingAccountId,
-        equity,
-      );
-      await this.ruleEvaluator.updateAccountStatus(
-        tradingAccountId,
-        evaluation,
-        userId,
+        {
+          type: 'TRADE_CLOSE',
+          triggeredBy: userId,
+          metadata: {
+            tradeId: trade.id,
+            symbol: trade.symbol,
+            realizedPnl: FinancialCalculations.formatMoney(realizedPnl),
+          },
+        },
       );
 
-      // 15. Create audit log
+      // 17. Emit post-evaluation events (after successful transaction)
+      this.riskEvaluation.emitPostEvaluationEvents(evaluation);
+
+      // 18. Create audit log
       await tx.auditLog.create({
         data: {
           actorId: userId,
@@ -437,14 +456,18 @@ export class TradingEngineV2Service {
             volume: trade.volume.toString(),
             entryPrice: trade.entryPrice.toString(),
             exitPrice: exitPrice.toString(),
-            realizedPnl: realizedPnl.toString(),
+            realizedPnl: FinancialCalculations.formatMoney(realizedPnl),
+            newBalance: FinancialCalculations.formatMoney(financialState.balance),
+            newEquity: FinancialCalculations.formatMoney(financialState.equity),
+            hwmUpdated: financialState.hwmUpdated,
+            hwm: FinancialCalculations.formatMoney(financialState.hwm),
             closeReason: 'MANUAL',
           },
         },
       });
 
       this.logger.log(
-        `Trade closed: ${trade.id} - P&L: ${realizedPnl.toFixed(2)}`,
+        `Trade closed: ${trade.id} - P&L: ${FinancialCalculations.formatMoney(realizedPnl)}`,
       );
 
       return closedTrade;
@@ -581,123 +604,4 @@ export class TradingEngineV2Service {
     }
   }
 
-  /**
-   * Calculate account equity
-   */
-  private async calculateAccountEquity(
-    tradingAccountId: string,
-    tx?: any,
-  ): Promise<Decimal> {
-    const prisma = tx || this.prisma;
-
-    const account = await prisma.tradingAccount.findUnique({
-      where: { id: tradingAccountId },
-      include: {
-        trades: {
-          where: { status: TradeStatus.OPEN },
-        },
-      },
-    });
-
-    if (!account) {
-      throw new NotFoundException(TradingErrorCode.ACCOUNT_NOT_FOUND);
-    }
-
-    let equity = account.currentBalance;
-
-    // Add unrealized P&L from open trades
-    for (const trade of account.trades) {
-      const instrument = this.instrumentConfig.getInstrument(trade.symbol);
-      const contractMultiplier = instrument?.contractMultiplier || 1;
-
-      let currentPrice: Decimal | null;
-      if (trade.side === TradeSide.BUY) {
-        currentPrice = this.marketData.getBid(trade.symbol);
-      } else {
-        currentPrice = this.marketData.getAsk(trade.symbol);
-      }
-
-      if (!currentPrice) {
-        continue;
-      }
-
-      let unrealizedPnl: Decimal;
-      if (trade.side === TradeSide.BUY) {
-        unrealizedPnl = currentPrice
-          .minus(trade.entryPrice)
-          .times(trade.volume)
-          .times(contractMultiplier);
-      } else {
-        unrealizedPnl = trade.entryPrice
-          .minus(currentPrice)
-          .times(trade.volume)
-          .times(contractMultiplier);
-      }
-
-      equity = equity.plus(unrealizedPnl);
-    }
-
-    return equity;
-  }
-
-  /**
-   * Calculate account P&L
-   */
-  private async calculateAccountPnl(
-    tradingAccountId: string,
-    tx?: any,
-  ): Promise<{ realizedPnl: Decimal; unrealizedPnl: Decimal }> {
-    const prisma = tx || this.prisma;
-
-    const account = await prisma.tradingAccount.findUnique({
-      where: { id: tradingAccountId },
-      include: {
-        trades: true,
-      },
-    });
-
-    if (!account) {
-      throw new NotFoundException(TradingErrorCode.ACCOUNT_NOT_FOUND);
-    }
-
-    // Realized P&L
-    const realizedPnl = account.trades
-      .filter((t) => t.status === TradeStatus.CLOSED)
-      .reduce((sum, t) => sum.plus(t.realizedPnl), new Decimal(0));
-
-    // Unrealized P&L
-    let unrealizedPnl = new Decimal(0);
-    for (const trade of account.trades.filter((t) => t.status === TradeStatus.OPEN)) {
-      const instrument = this.instrumentConfig.getInstrument(trade.symbol);
-      const contractMultiplier = instrument?.contractMultiplier || 1;
-
-      let currentPrice: Decimal | null;
-      if (trade.side === TradeSide.BUY) {
-        currentPrice = this.marketData.getBid(trade.symbol);
-      } else {
-        currentPrice = this.marketData.getAsk(trade.symbol);
-      }
-
-      if (!currentPrice) {
-        continue;
-      }
-
-      let pnl: Decimal;
-      if (trade.side === TradeSide.BUY) {
-        pnl = currentPrice
-          .minus(trade.entryPrice)
-          .times(trade.volume)
-          .times(contractMultiplier);
-      } else {
-        pnl = trade.entryPrice
-          .minus(currentPrice)
-          .times(trade.volume)
-          .times(contractMultiplier);
-      }
-
-      unrealizedPnl = unrealizedPnl.plus(pnl);
-    }
-
-    return { realizedPnl, unrealizedPnl };
-  }
 }

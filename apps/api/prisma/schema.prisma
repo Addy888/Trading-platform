@@ -46,6 +46,12 @@ enum TradingAccountStatus {
   CLOSED
 }
 
+enum AccountStage {
+  CHALLENGE
+  VERIFICATION
+  FUNDED
+}
+
 enum TradeSide {
   BUY
   SELL
@@ -64,11 +70,16 @@ enum NotificationType {
   ACCOUNT_PASSED
   ACCOUNT_BREACHED
   ORDER_CREATED
+  ORDER_REJECTED
   PAYMENT_PENDING
   PAYMENT_COMPLETED
   PAYMENT_REJECTED
   SYSTEM_ALERT
   ADMIN_ALERT
+  DAILY_LOSS_WARNING
+  DRAWDOWN_WARNING
+  PROFIT_TARGET_APPROACHING
+  DAILY_RESET
 }
 
 enum NotificationPriority {
@@ -105,39 +116,44 @@ enum PaymentStatusExtended {
 }
 
 model User {
-  id               String   @id @default(uuid())
-  email            String   @unique
-  passwordHash     String
-  firstName        String
-  lastName         String
-  phone            String?
-  country          String?
-  role             Role     @default(USER)
-  isEmailVerified  Boolean  @default(false)
-  isActive         Boolean  @default(true)
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  id              String   @id @default(uuid())
+  email           String   @unique
+  passwordHash    String
+  firstName       String
+  lastName        String
+  phone           String?
+  country         String?
+  role            Role     @default(USER)
+  isEmailVerified Boolean  @default(false)
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
   refreshTokens          RefreshToken[]
-  auditLogs              AuditLog[]               @relation("ActorAuditLogs")
+  auditLogs              AuditLog[]              @relation("ActorAuditLogs")
   orders                 Order[]
   tradingAccounts        TradingAccount[]
   notifications          Notification[]
   notificationPreference NotificationPreference?
   payouts                Payout[]
   kycSubmissions         KycSubmission[]
+  brokerConnections      BrokerConnection[]
+  brokerOrders           BrokerOrder[]
+  brokerPositions        BrokerPosition[]
+  brokerHoldings         BrokerHolding[]
+  brokerPortfolioSyncs   BrokerPortfolioSync[]
 
   @@map("users")
 }
 
 model RefreshToken {
-  id         String   @id @default(uuid())
-  userId     String
-  tokenHash  String   @unique
-  expiresAt  DateTime
-  createdAt  DateTime @default(now())
+  id        String   @id @default(uuid())
+  userId    String
+  tokenHash String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
 
-  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("refresh_tokens")
 }
@@ -151,50 +167,54 @@ model AuditLog {
   metadata   Json?
   createdAt  DateTime @default(now())
 
-  actor      User?    @relation("ActorAuditLogs", fields: [actorId], references: [id], onDelete: SetNull)
+  actor User? @relation("ActorAuditLogs", fields: [actorId], references: [id], onDelete: SetNull)
 
+  @@index([entityId, createdAt])
+  @@index([action, createdAt])
+  @@index([entityType, entityId, createdAt])
+  @@index([actorId, createdAt])
   @@map("audit_logs")
 }
 
 model TradingRule {
-  id            String   @id @default(uuid())
-  name          String
-  description   String?  @db.Text
-  type          RuleType
-  value         Decimal  @db.Decimal(10, 2)
-  isPercentage  Boolean  @default(false)
-  isActive      Boolean  @default(true)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id           String   @id @default(uuid())
+  name         String
+  description  String?  @db.Text
+  type         RuleType
+  value        Decimal  @db.Decimal(10, 2)
+  isPercentage Boolean  @default(false)
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
-  ruleSetRules  RuleSetRule[]
+  ruleSetRules RuleSetRule[]
 
   @@map("trading_rules")
 }
 
 model RuleSet {
-  id            String   @id @default(uuid())
-  name          String
-  description   String?  @db.Text
-  isActive      Boolean  @default(true)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id          String   @id @default(uuid())
+  name        String
+  description String?  @db.Text
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
-  ruleSetRules  RuleSetRule[]
-  challengePlans ChallengePlan[]
+  ruleSetRules    RuleSetRule[]
+  challengePlans  ChallengePlan[]
   tradingAccounts TradingAccount[]
 
   @@map("rule_sets")
 }
 
 model RuleSetRule {
-  id         String   @id @default(uuid())
-  ruleSetId  String
-  ruleId     String
-  createdAt  DateTime @default(now())
+  id        String   @id @default(uuid())
+  ruleSetId String
+  ruleId    String
+  createdAt DateTime @default(now())
 
-  ruleSet    RuleSet     @relation(fields: [ruleSetId], references: [id], onDelete: Cascade)
-  rule       TradingRule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+  ruleSet RuleSet     @relation(fields: [ruleSetId], references: [id], onDelete: Cascade)
+  rule    TradingRule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
 
   @@unique([ruleSetId, ruleId])
   @@map("rule_set_rules")
@@ -212,8 +232,8 @@ model ChallengePlan {
   createdAt   DateTime        @default(now())
   updatedAt   DateTime        @updatedAt
 
-  ruleSet     RuleSet         @relation(fields: [ruleSetId], references: [id], onDelete: Restrict)
-  orders      Order[]
+  ruleSet         RuleSet          @relation(fields: [ruleSetId], references: [id], onDelete: Restrict)
+  orders          Order[]
   tradingAccounts TradingAccount[]
 
   @@map("challenge_plans")
@@ -230,54 +250,88 @@ model Order {
   createdAt       DateTime    @default(now())
   updatedAt       DateTime    @updatedAt
 
-  user            User           @relation(fields: [userId], references: [id], onDelete: Cascade)
-  challengePlan   ChallengePlan  @relation(fields: [challengePlanId], references: [id], onDelete: Restrict)
-  payment         Payment?
-  tradingAccount  TradingAccount?
+  user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  challengePlan  ChallengePlan   @relation(fields: [challengePlanId], references: [id], onDelete: Restrict)
+  payment        Payment?
+  tradingAccount TradingAccount?
 
   @@map("orders")
 }
 
 model Payment {
-  id                String                 @id @default(uuid())
-  orderId           String                 @unique
-  amount            Decimal                @db.Decimal(10, 2)
+  id                String                @id @default(uuid())
+  orderId           String                @unique
+  amount            Decimal               @db.Decimal(10, 2)
   currency          String
-  status            PaymentStatusExtended  @default(PENDING)
-  provider          String                 @default("MANUAL_TEST")
+  status            PaymentStatusExtended @default(PENDING)
+  provider          String                @default("MANUAL_TEST")
   providerReference String?
   method            String?
   reference         String?
   metadata          Json?
-  createdAt         DateTime               @default(now())
-  updatedAt         DateTime               @updatedAt
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
 
-  order             Order                  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
 
   @@map("payments")
 }
 
 model TradingAccount {
-  id              String               @id @default(uuid())
+  id              String @id @default(uuid())
   userId          String
   challengePlanId String
-  orderId         String               @unique
+  orderId         String @unique
   ruleSetId       String
-  accountNumber   String               @unique
-  initialBalance  Decimal              @db.Decimal(12, 2)
-  currentBalance  Decimal              @db.Decimal(12, 2)
-  equity          Decimal              @db.Decimal(12, 2)
-  status          TradingAccountStatus @default(ACTIVE)
-  startedAt       DateTime?
-  createdAt       DateTime             @default(now())
-  updatedAt       DateTime             @updatedAt
+  accountNumber   String @unique
 
-  user            User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
-  challengePlan   ChallengePlan        @relation(fields: [challengePlanId], references: [id], onDelete: Restrict)
-  order           Order                @relation(fields: [orderId], references: [id], onDelete: Restrict)
-  ruleSet         RuleSet              @relation(fields: [ruleSetId], references: [id], onDelete: Restrict)
-  trades          Trade[]
-  snapshots       AccountSnapshot[]
+  // Balance & Equity
+  initialBalance Decimal @db.Decimal(12, 2)
+  currentBalance Decimal @db.Decimal(12, 2)
+  equity         Decimal @db.Decimal(12, 2)
+  highWaterMark  Decimal @default(0) @db.Decimal(12, 2) // Highest equity reached (P0-1)
+
+  // State Management
+  status TradingAccountStatus @default(ACTIVE)
+  stage  AccountStage         @default(CHALLENGE)
+
+  // Daily Tracking
+  dailyStartBalance Decimal   @default(0) @db.Decimal(12, 2)
+  dailyStartEquity  Decimal   @default(0) @db.Decimal(12, 2)
+  currentDailyPnl   Decimal   @default(0) @db.Decimal(12, 2)
+  lastDailyResetAt  DateTime?
+
+  // Drawdown Tracking
+  currentDrawdown Decimal @default(0) @db.Decimal(10, 4) // Percentage
+
+  // Breach Tracking
+  breachedAt   DateTime?
+  breachReason String?   @db.Text
+
+  // Pass Tracking
+  passedAt DateTime?
+
+  // Trading Activity
+  lastTradeAt DateTime?
+
+  // Timezone (for daily reset)
+  timezone String @default("UTC")
+
+  // Timestamps
+  startedAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  user           User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  challengePlan  ChallengePlan        @relation(fields: [challengePlanId], references: [id], onDelete: Restrict)
+  order          Order                @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  ruleSet        RuleSet              @relation(fields: [ruleSetId], references: [id], onDelete: Restrict)
+  trades            Trade[]
+  snapshots         AccountSnapshot[]
+  ruleSnapshot      AccountRuleSnapshot?
+  dailySnapshots    DailySnapshot[]
+  brokerOrders      BrokerOrder[]
+  brokerPositions   BrokerPosition[]
 
   @@index([userId, status])
   @@map("trading_accounts")
@@ -294,14 +348,15 @@ model Trade {
   stopLoss         Decimal?    @db.Decimal(18, 8)
   takeProfit       Decimal?    @db.Decimal(18, 8)
   status           TradeStatus @default(OPEN)
-  realizedPnl      Decimal     @db.Decimal(12, 2) @default(0)
-  unrealizedPnl    Decimal     @db.Decimal(12, 2) @default(0)
+  realizedPnl      Decimal     @default(0) @db.Decimal(12, 2)
+  unrealizedPnl    Decimal     @default(0) @db.Decimal(12, 2)
+  ruleSnapshot     Json? // Rules active at trade open (P0-3)
   openedAt         DateTime    @default(now())
   closedAt         DateTime?
   createdAt        DateTime    @default(now())
   updatedAt        DateTime    @updatedAt
 
-  tradingAccount   TradingAccount @relation(fields: [tradingAccountId], references: [id], onDelete: Cascade)
+  tradingAccount TradingAccount @relation(fields: [tradingAccountId], references: [id], onDelete: Cascade)
 
   @@map("trades")
 }
@@ -316,10 +371,44 @@ model AccountSnapshot {
   totalPnl         Decimal  @db.Decimal(12, 2)
   createdAt        DateTime @default(now())
 
-  tradingAccount   TradingAccount @relation(fields: [tradingAccountId], references: [id], onDelete: Cascade)
+  tradingAccount TradingAccount @relation(fields: [tradingAccountId], references: [id], onDelete: Cascade)
 
   @@index([tradingAccountId, createdAt])
   @@map("account_snapshots")
+}
+
+model AccountRuleSnapshot {
+  id               String   @id @default(uuid())
+  tradingAccountId String   @unique
+  ruleSetId        String
+  ruleSetName      String
+  snapshotVersion  String // Timestamp-based version identifier
+  rules            Json // Complete rule configuration at account creation
+  createdAt        DateTime @default(now())
+
+  tradingAccount TradingAccount @relation(fields: [tradingAccountId], references: [id], onDelete: Cascade)
+
+  @@map("account_rule_snapshots")
+}
+
+model DailySnapshot {
+  id                String   @id @default(uuid())
+  tradingAccountId  String
+  tradingDay        DateTime @db.Date
+  startOfDayBalance Decimal  @db.Decimal(12, 2)
+  startOfDayEquity  Decimal  @db.Decimal(12, 2)
+  endOfDayBalance   Decimal? @db.Decimal(12, 2)
+  endOfDayEquity    Decimal? @db.Decimal(12, 2)
+  dailyPnl          Decimal  @default(0) @db.Decimal(12, 2)
+  highWaterMark     Decimal  @db.Decimal(12, 2)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  tradingAccount TradingAccount @relation(fields: [tradingAccountId], references: [id], onDelete: Cascade)
+
+  @@unique([tradingAccountId, tradingDay])
+  @@index([tradingAccountId, tradingDay])
+  @@map("daily_snapshots")
 }
 
 model Notification {
@@ -361,53 +450,95 @@ model NotificationPreference {
 }
 
 model Payout {
-  id                String        @id @default(uuid())
-  userId            String
-  tradingAccountId  String
-  amount            Decimal       @db.Decimal(12, 2)
-  currency          String        @default("USD")
-  status            PayoutStatus  @default(PENDING)
-  method            String?
-  destination       String?       @db.Text
-  reference         String?
-  notes             String?       @db.Text
-  requestedAt       DateTime      @default(now())
-  processedAt       DateTime?
-  completedAt       DateTime?
-  reviewedAt        DateTime?
-  reviewedBy        String?
-  createdAt         DateTime      @default(now())
-  updatedAt         DateTime      @updatedAt
+  id               String       @id @default(uuid())
+  userId           String
+  tradingAccountId String
+  amount           Decimal      @db.Decimal(12, 2)
+  currency         String       @default("USD")
+  status           PayoutStatus @default(PENDING)
+  method           String?
+  destination      String?      @db.Text
+  reference        String?
+  notes            String?      @db.Text
+  requestedAt      DateTime     @default(now())
+  processedAt      DateTime?
+  completedAt      DateTime?
+  reviewedAt       DateTime?
+  reviewedBy       String?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user             User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  consistencyCheck ConsistencyCheck?
 
   @@index([userId, status])
   @@index([status])
   @@map("payouts")
 }
 
+model ConsistencyCheck {
+  id                       String   @id @default(uuid())
+  payoutId                 String   @unique
+  tradingAccountId         String
+  ruleSnapshotVersion      String
+  totalProfit              Decimal  @db.Decimal(12, 2)
+  highestProfitableDay     Decimal  @db.Decimal(12, 2)
+  highestProfitableDayDate DateTime
+  consistencyPercentage    Decimal  @db.Decimal(5, 2)
+  requiredThreshold        Decimal? @db.Decimal(5, 2)
+  passed                   Boolean
+  profitableDaysCount      Int
+  totalTradingDays         Int
+  evaluatedAt              DateTime @default(now())
+  metadata                 Json?
+
+  payout Payout @relation(fields: [payoutId], references: [id], onDelete: Cascade)
+
+  @@index([tradingAccountId])
+  @@map("consistency_checks")
+}
+
+model ExposureSnapshot {
+  id               String   @id @default(uuid())
+  tradingAccountId String?
+  exposureBookId   String?
+  symbol           String
+  netVolume        Decimal  @db.Decimal(10, 4)
+  grossVolume      Decimal  @db.Decimal(10, 4)
+  buyVolume        Decimal  @db.Decimal(10, 4)
+  sellVolume       Decimal  @db.Decimal(10, 4)
+  netExposure      Decimal  @db.Decimal(12, 2)
+  grossExposure    Decimal  @db.Decimal(12, 2)
+  openPositions    Int
+  timestamp        DateTime @default(now())
+
+  @@index([tradingAccountId, symbol, timestamp])
+  @@index([exposureBookId, symbol, timestamp])
+  @@map("exposure_snapshots")
+}
+
 model KycSubmission {
-  id                String    @id @default(uuid())
-  userId            String
-  status            KycStatus @default(NOT_SUBMITTED)
-  fullName          String?
-  dateOfBirth       DateTime?
-  address           String?   @db.Text
-  city              String?
-  country           String?
-  postalCode        String?
-  documentType      String?
-  documentNumber    String?
-  documentFrontUrl  String?   @db.Text
-  documentBackUrl   String?   @db.Text
-  selfieUrl         String?   @db.Text
-  submittedAt       DateTime?
-  reviewedAt        DateTime?
-  reviewedBy        String?
-  reviewNotes       String?   @db.Text
-  metadata          Json?
-  createdAt         DateTime  @default(now())
-  updatedAt         DateTime  @updatedAt
+  id               String    @id @default(uuid())
+  userId           String
+  status           KycStatus @default(NOT_SUBMITTED)
+  fullName         String?
+  dateOfBirth      DateTime?
+  address          String?   @db.Text
+  city             String?
+  country          String?
+  postalCode       String?
+  documentType     String?
+  documentNumber   String?
+  documentFrontUrl String?   @db.Text
+  documentBackUrl  String?   @db.Text
+  selfieUrl        String?   @db.Text
+  submittedAt      DateTime?
+  reviewedAt       DateTime?
+  reviewedBy       String?
+  reviewNotes      String?   @db.Text
+  metadata         Json?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -417,16 +548,320 @@ model KycSubmission {
 }
 
 model PlatformSettings {
-  id                  String   @id @default(uuid())
-  key                 String   @unique
-  value               String   @db.Text
-  description         String?  @db.Text
-  category            String?
-  isPublic            Boolean  @default(false)
-  updatedBy           String?
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
+  id          String   @id @default(uuid())
+  key         String   @unique
+  value       String   @db.Text
+  description String?  @db.Text
+  category    String?
+  isPublic    Boolean  @default(false)
+  updatedBy   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
   @@map("platform_settings")
 }
 
+model BrokerConnection {
+  id               String    @id @default(uuid())
+  userId           String
+  provider         String    // "ANGELONE", "ZERODHA", etc.
+  status           String    @default("DISCONNECTED") // "CONNECTED", "DISCONNECTED", "EXPIRED", "ERROR", "NOT_CONFIGURED"
+  
+  // Encrypted credentials (never plaintext)
+  clientId         String?   // Encrypted
+  encryptedToken   String?   @db.Text // Encrypted session token
+  encryptedRefresh String?   @db.Text // Encrypted refresh token
+  tokenExpiresAt   DateTime?
+  
+  // Metadata
+  lastConnectedAt  DateTime?
+  lastErrorMessage String?   @db.Text
+  lastErrorCode    String?
+  metadata         Json?     // Provider-specific data (profile, etc.)
+  
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  
+  user                 User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  brokerOrders         BrokerOrder[]
+  brokerPositions      BrokerPosition[]
+  brokerHoldings       BrokerHolding[]
+  brokerPortfolioSyncs BrokerPortfolioSync[]
+  
+  @@unique([userId, provider])
+  @@index([userId, status])
+  @@map("broker_connections")
+}
+
+enum BrokerOrderStatus {
+  PENDING_SUBMISSION
+  SUBMITTED
+  PENDING_RECONCILIATION
+  OPEN
+  PARTIALLY_FILLED
+  FILLED
+  CANCELLED
+  REJECTED
+  EXPIRED
+  FAILED
+}
+
+enum BrokerPositionType {
+  OPEN
+  CLOSED
+}
+
+model BrokerOrder {
+  id                   String            @id @default(uuid())
+  userId               String
+  tradingAccountId     String
+  brokerConnectionId   String
+  
+  // Trading mode
+  tradingMode          String            @default("SIMULATED") // "SIMULATED" or "LIVE"
+  
+  // Instrument details
+  symbol               String
+  exchange             String?
+  instrumentToken      String?
+  
+  // Order details
+  side                 TradeSide
+  orderType            String            // "MARKET", "LIMIT", "STOP", "STOP_LIMIT"
+  quantity             Decimal           @db.Decimal(10, 4)
+  price                Decimal?          @db.Decimal(18, 8)
+  triggerPrice         Decimal?          @db.Decimal(18, 8)
+  stopLoss             Decimal?          @db.Decimal(18, 8)
+  takeProfit           Decimal?          @db.Decimal(18, 8)
+  
+  // Broker details
+  brokerOrderId        String?
+  brokerStatus         String?
+  brokerMessage        String?           @db.Text
+  
+  // Normalized status
+  status               BrokerOrderStatus @default(PENDING_SUBMISSION)
+  statusMessage        String?           @db.Text
+  
+  // Fill details
+  filledQuantity       Decimal           @default(0) @db.Decimal(10, 4)
+  averageFillPrice     Decimal?          @db.Decimal(18, 8)
+  totalFillValue       Decimal?          @db.Decimal(18, 2)
+  commission           Decimal           @default(0) @db.Decimal(12, 2)
+  
+  // Risk validation
+  riskValidationCode   String?
+  riskValidationMessage String?          @db.Text
+  riskValidationMetadata Json?
+  
+  // Idempotency
+  idempotencyKey       String            @unique
+  
+  // Reconciliation
+  needsReconciliation  Boolean           @default(false)
+  lastReconciliationAt DateTime?
+  reconciliationAttempts Int             @default(0)
+  
+  // Rejection details
+  rejectedAt           DateTime?
+  rejectionReason      String?           @db.Text
+  rejectionCode        String?
+  
+  // Timestamps
+  submittedAt          DateTime?
+  acceptedAt           DateTime?
+  filledAt             DateTime?
+  cancelledAt          DateTime?
+  createdAt            DateTime          @default(now())
+  updatedAt            DateTime          @updatedAt
+  
+  user                 User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tradingAccount       TradingAccount    @relation(fields: [tradingAccountId], references: [id], onDelete: Cascade)
+  brokerConnection     BrokerConnection  @relation(fields: [brokerConnectionId], references: [id], onDelete: Cascade)
+  statusHistory        BrokerOrderStatusHistory[]
+  
+  @@index([userId])
+  @@index([tradingAccountId])
+  @@index([brokerConnectionId])
+  @@index([status])
+  @@index([brokerOrderId])
+  @@index([needsReconciliation])
+  @@index([createdAt])
+  @@map("broker_orders")
+}
+
+model BrokerOrderStatusHistory {
+  id              String   @id @default(uuid())
+  brokerOrderId   String
+  previousStatus  String?
+  newStatus       String
+  statusMessage   String?  @db.Text
+  brokerResponse  Json?
+  changedAt       DateTime @default(now())
+  
+  brokerOrder     BrokerOrder @relation(fields: [brokerOrderId], references: [id], onDelete: Cascade)
+  
+  @@index([brokerOrderId])
+  @@index([changedAt])
+  @@map("broker_order_status_history")
+}
+
+
+model BrokerPosition {
+  id                   String             @id @default(uuid())
+  userId               String
+  brokerConnectionId   String
+  tradingAccountId     String?
+  
+  // Broker identity
+  brokerPositionId     String?
+  exchange             String             @db.VarChar(50)
+  symbol               String             @db.VarChar(100)
+  symbolToken          String             @db.VarChar(50)
+  tradingSymbol        String
+  
+  // Product details
+  productType          String             @db.VarChar(50)
+  instrumentType       String?
+  
+  // Quantities (Decimal for precision)
+  netQuantity          Decimal            @default(0) @db.Decimal(10, 4)
+  buyQuantity          Decimal            @default(0) @db.Decimal(10, 4)
+  sellQuantity         Decimal            @default(0) @db.Decimal(10, 4)
+  
+  // Prices
+  netAveragePrice      Decimal?           @db.Decimal(18, 8)
+  buyAveragePrice      Decimal?           @db.Decimal(18, 8)
+  sellAveragePrice     Decimal?           @db.Decimal(18, 8)
+  lastTradedPrice      Decimal?           @db.Decimal(18, 8)
+  closePrice           Decimal?           @db.Decimal(18, 8)
+  
+  // P&L (broker-confirmed)
+  realizedPnl          Decimal            @default(0) @db.Decimal(12, 2)
+  unrealizedPnl        Decimal            @default(0) @db.Decimal(12, 2)
+  totalPnl             Decimal            @default(0) @db.Decimal(12, 2)
+  pnlPercentage        Decimal?           @db.Decimal(10, 4)
+  
+  // Values
+  totalBuyValue        Decimal?           @db.Decimal(18, 2)
+  totalSellValue       Decimal?           @db.Decimal(18, 2)
+  netValue             Decimal?           @db.Decimal(18, 2)
+  
+  // Contract details
+  multiplier           Int                @default(1)
+  lotSize              Int                @default(1)
+  
+  // Position type
+  positionType         BrokerPositionType @default(OPEN)
+  
+  // Last sync metadata
+  lastSyncedAt         DateTime
+  brokerRawData        Json?
+  
+  // Timestamps
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+  
+  user                 User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  brokerConnection     BrokerConnection   @relation(fields: [brokerConnectionId], references: [id], onDelete: Cascade)
+  tradingAccount       TradingAccount?    @relation(fields: [tradingAccountId], references: [id], onDelete: SetNull)
+  
+  @@unique([userId, brokerConnectionId, exchange, symbol, symbolToken, productType])
+  @@index([userId])
+  @@index([brokerConnectionId])
+  @@index([tradingAccountId])
+  @@index([exchange, symbol])
+  @@index([symbolToken])
+  @@index([positionType])
+  @@index([lastSyncedAt])
+  @@map("broker_positions")
+}
+
+model BrokerHolding {
+  id                   String           @id @default(uuid())
+  userId               String
+  brokerConnectionId   String
+  
+  // Broker identity
+  exchange             String           @db.VarChar(50)
+  symbol               String           @db.VarChar(100)
+  symbolToken          String           @db.VarChar(50)
+  tradingSymbol        String
+  isin                 String?
+  
+  // Quantities
+  quantity             Decimal          @default(0) @db.Decimal(10, 4)
+  t1Quantity           Decimal          @default(0) @db.Decimal(10, 4)
+  realizedQuantity     Decimal          @default(0) @db.Decimal(10, 4)
+  authorizedQuantity   Decimal          @default(0) @db.Decimal(10, 4)
+  collateralQuantity   Decimal          @default(0) @db.Decimal(10, 4)
+  
+  // Prices
+  averagePrice         Decimal?         @db.Decimal(18, 8)
+  lastTradedPrice      Decimal?         @db.Decimal(18, 8)
+  closePrice           Decimal?         @db.Decimal(18, 8)
+  
+  // P&L
+  profitAndLoss        Decimal          @default(0) @db.Decimal(12, 2)
+  pnlPercentage        Decimal?         @db.Decimal(10, 4)
+  
+  // Values
+  currentValue         Decimal?         @db.Decimal(18, 2)
+  investedValue        Decimal?         @db.Decimal(18, 2)
+  
+  // Collateral
+  collateralType       String?
+  haircut              Decimal?         @db.Decimal(5, 2)
+  
+  // Last sync
+  lastSyncedAt         DateTime
+  brokerRawData        Json?
+  
+  // Timestamps
+  createdAt            DateTime         @default(now())
+  updatedAt            DateTime         @updatedAt
+  
+  user                 User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  brokerConnection     BrokerConnection @relation(fields: [brokerConnectionId], references: [id], onDelete: Cascade)
+  
+  @@unique([userId, brokerConnectionId, exchange, symbol, symbolToken])
+  @@index([userId])
+  @@index([brokerConnectionId])
+  @@index([exchange, symbol])
+  @@index([symbolToken])
+  @@index([lastSyncedAt])
+  @@map("broker_holdings")
+}
+
+model BrokerPortfolioSync {
+  id                   String    @id @default(uuid())
+  userId               String
+  brokerConnectionId   String
+  
+  // Sync details
+  syncType             String
+  status               String
+  startedAt            DateTime
+  completedAt          DateTime?
+  
+  // Results
+  positionsCount       Int?
+  holdingsCount        Int?
+  fundsData            Json?
+  
+  // Error tracking
+  errorMessage         String?  @db.Text
+  errorCode            String?
+  
+  // Timestamps
+  createdAt            DateTime @default(now())
+  
+  user                 User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  brokerConnection     BrokerConnection @relation(fields: [brokerConnectionId], references: [id], onDelete: Cascade)
+  
+  @@index([userId])
+  @@index([brokerConnectionId])
+  @@index([status])
+  @@index([startedAt])
+  @@map("broker_portfolio_syncs")
+}

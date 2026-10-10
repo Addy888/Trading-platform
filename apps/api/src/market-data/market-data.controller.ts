@@ -1,18 +1,24 @@
-import { Controller, Get, Param, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Param, Query, UseGuards, Post, Body } from '@nestjs/common';
 import { SimulatedMarketEngineService } from './simulated-market-engine.service';
+import { UnifiedMarketDataService } from './unified-market-data.service';
+import { TwelveDataProvider } from './providers/twelvedata/twelve-data.provider';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { MarketDataSource } from './dto/normalized-tick.dto';
 
 /**
  * Market Data Controller
  * 
  * REST API for market prices (fallback when WebSocket unavailable)
  * 
- * IMPORTANT: All prices are SIMULATED/DEMO data
+ * Day 2: Extended with unified market data endpoints (SIMULATED + LIVE)
+ * Day 4: Added Twelve Data integration
  */
 @Controller('market')
 export class MarketDataController {
   constructor(
     private readonly marketEngine: SimulatedMarketEngineService,
+    private readonly unifiedMarketData: UnifiedMarketDataService,
+    private readonly twelveData: TwelveDataProvider,
   ) {}
 
   /**
@@ -142,5 +148,145 @@ export class MarketDataController {
       '1D': 1440,
     };
     return map[timeframe] || 60;
+  }
+
+  /**
+   * DAY 2: Get market data status
+   * 
+   * GET /api/market-data/status
+   */
+  @Get('data/status')
+  @UseGuards(JwtAuthGuard)
+  getMarketDataStatus() {
+    return this.unifiedMarketData.getStatus();
+  }
+
+  /**
+   * DAY 2: Get market data health
+   * 
+   * GET /api/market-data/health
+   */
+  @Get('data/health')
+  @UseGuards(JwtAuthGuard)
+  getMarketDataHealth() {
+    return this.unifiedMarketData.getHealth();
+  }
+
+  /**
+   * DAY 2: Get all quotes (unified)
+   * 
+   * GET /api/market-data/quotes
+   */
+  @Get('data/quotes')
+  @UseGuards(JwtAuthGuard)
+  getAllQuotes(@Query('source') source?: string) {
+    const dataSource = source as MarketDataSource | undefined;
+    return {
+      quotes: this.unifiedMarketData.getAllQuotes(dataSource),
+      source: dataSource || this.unifiedMarketData.getActiveSource(),
+      timestamp: new Date(),
+    };
+  }
+
+  /**
+   * DAY 2: Get quote for specific symbol (unified)
+   * 
+   * GET /api/market-data/quotes/:symbol
+   */
+  @Get('data/quotes/:symbol')
+  @UseGuards(JwtAuthGuard)
+  getQuote(
+    @Param('symbol') symbol: string,
+    @Query('source') source?: string,
+  ) {
+    const dataSource = source as MarketDataSource | undefined;
+    return this.unifiedMarketData.getQuote(symbol, dataSource);
+  }
+
+  /**
+   * DAY 2: Set active market data source
+   * 
+   * POST /api/market-data/source
+   */
+  @Post('data/source')
+  @UseGuards(JwtAuthGuard)
+  setActiveSource(@Body() body: { source: MarketDataSource }) {
+    this.unifiedMarketData.setActiveSource(body.source);
+    return {
+      success: true,
+      source: body.source,
+      timestamp: new Date(),
+    };
+  }
+
+  /**
+   * DAY 4: Get Twelve Data provider status
+   * 
+   * GET /api/market/twelvedata/status
+   */
+  @Get('twelvedata/status')
+  @UseGuards(JwtAuthGuard)
+  getTwelveDataStatus() {
+    return this.twelveData.getStatus();
+  }
+
+  /**
+   * DAY 4: Get real-time quote from Twelve Data
+   * 
+   * GET /api/market/twelvedata/quote/:symbol
+   */
+  @Get('twelvedata/quote/:symbol')
+  @UseGuards(JwtAuthGuard)
+  async getTwelveDataQuote(@Param('symbol') symbol: string) {
+    try {
+      const quote = await this.twelveData.getQuote(symbol);
+      return {
+        success: true,
+        symbol,
+        quote,
+        timestamp: new Date(),
+      };
+    } catch (error) {
+      return {
+        success: false,
+        symbol,
+        error: (error as Error).message,
+        timestamp: new Date(),
+      };
+    }
+  }
+
+  /**
+   * DAY 4: Get historical candles from Twelve Data
+   * 
+   * GET /api/market/twelvedata/candles/:symbol?interval=1h&outputsize=100
+   */
+  @Get('twelvedata/candles/:symbol')
+  @UseGuards(JwtAuthGuard)
+  async getTwelveDataCandles(
+    @Param('symbol') symbol: string,
+    @Query('interval') interval: string = '1h',
+    @Query('outputsize') outputsizeStr: string = '100',
+  ) {
+    try {
+      const outputsize = parseInt(outputsizeStr, 10);
+      const candles = await this.twelveData.getTimeSeries(symbol, interval, outputsize);
+      
+      return {
+        success: true,
+        symbol,
+        interval,
+        candles,
+        count: candles.length,
+        timestamp: new Date(),
+      };
+    } catch (error) {
+      return {
+        success: false,
+        symbol,
+        error: (error as Error).message,
+        timestamp: new Date(),
+      };
+    }
   }
 }

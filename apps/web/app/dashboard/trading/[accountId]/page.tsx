@@ -15,6 +15,8 @@ import { CandlestickChart } from '@/components/trading/candlestick-chart';
 import { PositionsTable } from '@/components/trading/positions-table';
 import { TradesTable } from '@/components/trading/trades-table';
 import { ChallengeProgress } from '@/components/trading/challenge-progress';
+import { ExecutionModeIndicator } from '@/components/trading/execution-mode-indicator';
+import { useTwelveDataQuotes } from '@/hooks/useTwelveDataQuotes';
 
 type TabType = 'positions' | 'trades';
 
@@ -35,6 +37,10 @@ export default function TradingTerminalPage() {
   const [marginInfo, setMarginInfo] = useState<MarginInfo | null>(null);
   const [challengeProgress, setChallengeProgress] = useState<any>(null);
   
+  // Execution mode state
+  const [executionMode, setExecutionMode] = useState<'SIMULATED' | 'PAPER' | 'BROKER_SANDBOX' | 'LIVE'>('SIMULATED');
+  const [useTwelveData, setUseTwelveData] = useState(true);
+  
   // Chart State
   const [selectedSymbol, setSelectedSymbol] = useState('EURUSD');
   const [selectedTimeframe, setSelectedTimeframe] = useState('1H');
@@ -47,12 +53,55 @@ export default function TradingTerminalPage() {
   const [marketStatus, setMarketStatus] = useState<'CONNECTED' | 'DISCONNECTED' | 'STALE'>('DISCONNECTED');
   const [symbols, setSymbols] = useState<string[]>([]);
 
+  // Twelve Data integration
+  const {
+    quotes: twelveDataQuotes,
+    loading: quotesLoading,
+    error: quotesError,
+    lastUpdate: quotesLastUpdate,
+  } = useTwelveDataQuotes({
+    symbols: symbols.length > 0 ? symbols : ['AAPL', 'MSFT', 'GOOGL', 'EURUSD', 'GBPUSD'],
+    accessToken,
+    enabled: useTwelveData && !!accessToken,
+    pollingInterval: 10000, // 10 seconds
+  });
+
   // Load initial data
   useEffect(() => {
     if (accessToken && accountId) {
       loadAllData();
     }
   }, [accessToken, accountId]);
+
+  // Sync Twelve Data quotes to local state
+  useEffect(() => {
+    if (useTwelveData && Object.keys(twelveDataQuotes).length > 0) {
+      const convertedQuotes: Record<string, { bid: string; ask: string; spread: string }> = {};
+      
+      Object.entries(twelveDataQuotes).forEach(([symbol, quoteData]) => {
+        convertedQuotes[symbol] = {
+          bid: quoteData.bid,
+          ask: quoteData.ask,
+          spread: quoteData.spread,
+        };
+      });
+      
+      setQuotes(convertedQuotes);
+      
+      // Update market status based on quote status
+      const hasLive = Object.values(twelveDataQuotes).some(q => q.status === 'LIVE');
+      const hasStale = Object.values(twelveDataQuotes).some(q => q.status === 'STALE');
+      const hasError = Object.values(twelveDataQuotes).every(q => q.status === 'ERROR' || q.status === 'UNAVAILABLE');
+      
+      if (hasError) {
+        setMarketStatus('DISCONNECTED');
+      } else if (hasStale) {
+        setMarketStatus('STALE');
+      } else if (hasLive) {
+        setMarketStatus('CONNECTED');
+      }
+    }
+  }, [twelveDataQuotes, useTwelveData]);
 
   const loadAllData = async () => {
     if (!accessToken) return;
@@ -110,6 +159,53 @@ export default function TradingTerminalPage() {
     if (!accessToken) return;
 
     try {
+      if (useTwelveData) {
+        // Use Twelve Data candles
+        const intervalMap: Record<string, string> = {
+          '1m': '1min',
+          '5m': '5min',
+          '15m': '15min',
+          '1H': '1h',
+          '4H': '4h',
+          '1D': '1day',
+        };
+        
+        const interval = intervalMap[timeframe] || '1h';
+        
+        try {
+          const candleData = await marketApi.getTwelveDataCandles(accessToken, symbol, interval, 100);
+          
+          if (candleData.success && candleData.candles.length > 0) {
+            const formattedCandles = candleData.candles.map((c: any) => ({
+              time: Math.floor(new Date(c.timestamp).getTime() / 1000),
+              open: parseFloat(c.open),
+              high: parseFloat(c.high),
+              low: parseFloat(c.low),
+              close: parseFloat(c.close),
+            }));
+            setCandles(formattedCandles);
+          } else {
+            console.warn('No candle data available from Twelve Data, using simulated');
+            // Fallback to simulated
+            await loadSimulatedCandles(symbol, timeframe);
+          }
+        } catch (err) {
+          console.error('Failed to load Twelve Data candles, falling back to simulated:', err);
+          await loadSimulatedCandles(symbol, timeframe);
+        }
+      } else {
+        // Use simulated candles
+        await loadSimulatedCandles(symbol, timeframe);
+      }
+    } catch (err) {
+      console.error('Failed to load candles:', err);
+    }
+  };
+
+  const loadSimulatedCandles = async (symbol: string, timeframe: string) => {
+    if (!accessToken) return;
+    
+    try {
       const candleData = await marketApi.getCandles(accessToken, symbol, timeframe, 100);
       const formattedCandles = candleData.candles.map((c: any) => ({
         time: c.time,
@@ -120,7 +216,7 @@ export default function TradingTerminalPage() {
       }));
       setCandles(formattedCandles);
     } catch (err) {
-      console.error('Failed to load candles:', err);
+      console.error('Failed to load simulated candles:', err);
     }
   };
 
@@ -331,6 +427,13 @@ export default function TradingTerminalPage() {
     loadCandles(selectedSymbol, timeframe);
   };
 
+  // Reload candles when data source changes
+  useEffect(() => {
+    if (selectedSymbol && selectedTimeframe && accessToken) {
+      loadCandles(selectedSymbol, selectedTimeframe);
+    }
+  }, [useTwelveData]); // eslint-disable-line react-hooks/exhaustive-deps
+
   if (loading) {
     return (
       <ProtectedRoute requireRole="USER">
@@ -450,6 +553,8 @@ export default function TradingTerminalPage() {
               quotes={quotes}
               selectedSymbol={selectedSymbol}
               onSymbolSelect={handleSymbolChange}
+              loading={quotesLoading}
+              dataSource={useTwelveData ? 'TWELVEDATA' : 'SIMULATED'}
             />
           </div>
 
@@ -522,6 +627,48 @@ export default function TradingTerminalPage() {
 
           {/* Right: Order Panel + Challenge Progress */}
           <div className="w-80 border-l border-gray-800 overflow-y-auto">
+            {/* Execution Mode Indicator */}
+            <div className="p-4 border-b border-gray-800">
+              <ExecutionModeIndicator mode={executionMode} />
+              
+              {/* Data Source Toggle */}
+              <div className="mt-3 bg-gray-800 rounded p-2">
+                <div className="text-xs text-gray-400 mb-2">Market Data Source:</div>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setUseTwelveData(true)}
+                    className={`flex-1 px-2 py-1 rounded text-xs font-semibold transition-colors ${
+                      useTwelveData
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                    }`}
+                  >
+                    LIVE (Twelve Data)
+                  </button>
+                  <button
+                    onClick={() => setUseTwelveData(false)}
+                    className={`flex-1 px-2 py-1 rounded text-xs font-semibold transition-colors ${
+                      !useTwelveData
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                    }`}
+                  >
+                    Simulated
+                  </button>
+                </div>
+                {quotesLastUpdate && useTwelveData && (
+                  <div className="mt-2 text-xs text-gray-500">
+                    Last update: {quotesLastUpdate.toLocaleTimeString()}
+                  </div>
+                )}
+                {quotesError && useTwelveData && (
+                  <div className="mt-2 text-xs text-red-400">
+                    {quotesError}
+                  </div>
+                )}
+              </div>
+            </div>
+            
             <OrderPanel
               symbol={selectedSymbol}
               bid={selectedQuote.bid}

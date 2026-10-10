@@ -4,9 +4,12 @@ import { PrismaService } from '../prisma/prisma.service';
 import { MarketPriceService } from '../market-data/market-price.service';
 import { MarketDataEngineService, MarketTick } from '../market-data/market-data-engine.service';
 import { InstrumentConfigService } from '../market-data/instrument-config.service';
+import { BalanceEquityService } from '../trading-engine/balance-equity.service';
+import { RiskEvaluationService } from '../risk-engine/risk-evaluation.service';
 import { ChallengeProgressService } from '../challenge-progress/challenge-progress.service';
-import { TradeStatus, TradeSide } from '@prisma/client';
+import { TradeStatus, TradeSide, TradingAccountStatus } from '@prisma/client';
 import Decimal from 'decimal.js';
+import { FinancialCalculations } from '../common/utils/financial-calculations.util';
 
 /**
  * Realtime Service
@@ -35,6 +38,8 @@ export class RealtimeService {
     private readonly marketPrice: MarketPriceService,
     private readonly marketDataEngine: MarketDataEngineService,
     private readonly instrumentConfig: InstrumentConfigService,
+    private readonly balanceEquity: BalanceEquityService,
+    private readonly riskEvaluation: RiskEvaluationService,
     private readonly challengeProgress: ChallengeProgressService,
   ) {}
 
@@ -156,14 +161,25 @@ export class RealtimeService {
 
       for (const trade of account.trades) {
         const currentPrice = this.marketPrice.getPrice(trade.symbol);
-        const unrealizedPnl = this.calculateUnrealizedPnl(
+        const instrument = this.instrumentConfig.getInstrument(trade.symbol);
+        const contractMultiplier = instrument?.contractMultiplier || 1;
+        
+        const unrealizedPnl = this.balanceEquity.calculatePositionUnrealizedPnl(
           trade.side,
-          trade.entryPrice,
+          new Decimal(trade.entryPrice),
           currentPrice,
-          trade.volume,
+          new Decimal(trade.volume),
+          contractMultiplier,
         );
         
-        totalUnrealizedPnl = totalUnrealizedPnl.plus(unrealizedPnl);
+        totalUnrealizedPnl = FinancialCalculations.add(totalUnrealizedPnl, unrealizedPnl);
+
+        // Day 14: Update trade unrealizedPnl field for persistence
+        // Note: This is done without waiting to avoid blocking real-time updates
+        // Any failures are logged but don't interrupt the update flow
+        this.updateTradeUnrealizedPnl(trade.id, unrealizedPnl).catch((err) => {
+          this.logger.warn(`Failed to update unrealizedPnl for trade ${trade.id}: ${err.message}`);
+        });
 
         positionUpdates.push({
           tradeId: trade.id,
@@ -173,33 +189,38 @@ export class RealtimeService {
           volume: trade.volume.toString(),
           entryPrice: trade.entryPrice.toString(),
           currentPrice: currentPrice.toString(),
-          unrealizedPnl: unrealizedPnl.toFixed(2),
+          unrealizedPnl: FinancialCalculations.formatMoney(unrealizedPnl),
           updatedAt: new Date(),
         });
       }
 
-      // Calculate equity
-      const equity = account.currentBalance.plus(totalUnrealizedPnl);
+      // Calculate equity and update HWM
+      const { equity, hwmUpdated, hwm } = await this.balanceEquity.updateFinancialStateOnPriceChange(
+        accountId,
+      );
 
-      // Update account equity in database
-      await this.prisma.tradingAccount.update({
-        where: { id: accountId },
-        data: { equity },
-      });
+      // Note: Risk evaluation is NOT performed on every market tick to avoid excessive DB writes.
+      // Risk evaluation happens on trade open/close (critical path).
+      // Market ticks only update HWM and WebSocket state for real-time display.
+      // If account status is ACTIVE and has EQUITY-based rules, those rules will be
+      // evaluated on the next trade action when equity-affecting events occur.
 
       // Calculate total PnL
-      const realizedPnl = await this.calculateRealizedPnl(accountId);
-      const totalPnl = realizedPnl.plus(totalUnrealizedPnl);
+      const realizedPnl = await this.balanceEquity.calculateTotalRealizedPnl(accountId);
+      const totalPnl = FinancialCalculations.add(realizedPnl, totalUnrealizedPnl);
 
       // Emit account update event via WebSocket gateway
       if (this.tradingGateway) {
         this.tradingGateway.emitAccountUpdate(accountId, {
           accountId: account.id,
           accountNumber: account.accountNumber,
-          currentBalance: account.currentBalance.toFixed(2),
-          equity: equity.toFixed(2),
-          unrealizedPnl: totalUnrealizedPnl.toFixed(2),
-          totalPnl: totalPnl.toFixed(2),
+          currentBalance: FinancialCalculations.formatMoney(account.currentBalance),
+          equity: FinancialCalculations.formatMoney(equity),
+          unrealizedPnl: FinancialCalculations.formatMoney(totalUnrealizedPnl),
+          realizedPnl: FinancialCalculations.formatMoney(realizedPnl),
+          totalPnl: FinancialCalculations.formatMoney(totalPnl),
+          highWaterMark: FinancialCalculations.formatMoney(hwm),
+          hwmUpdated,
           status: account.status,
           updatedAt: new Date(),
         });
@@ -218,46 +239,6 @@ export class RealtimeService {
   }
 
   /**
-   * Calculate unrealized PnL for a trade
-   */
-  private calculateUnrealizedPnl(
-    side: TradeSide,
-    entryPrice: Decimal,
-    currentPrice: Decimal,
-    volume: Decimal,
-  ): Decimal {
-    let pnl: Decimal;
-
-    if (side === TradeSide.BUY) {
-      pnl = currentPrice.minus(entryPrice).times(volume).times(this.CONTRACT_MULTIPLIER);
-    } else {
-      pnl = entryPrice.minus(currentPrice).times(volume).times(this.CONTRACT_MULTIPLIER);
-    }
-
-    return pnl;
-  }
-
-  /**
-   * Calculate total realized PnL for account
-   */
-  private async calculateRealizedPnl(accountId: string): Promise<Decimal> {
-    const closedTrades = await this.prisma.trade.findMany({
-      where: {
-        tradingAccountId: accountId,
-        status: TradeStatus.CLOSED,
-      },
-      select: {
-        realizedPnl: true,
-      },
-    });
-
-    return closedTrades.reduce(
-      (sum, trade) => sum.plus(trade.realizedPnl),
-      new Decimal(0),
-    );
-  }
-
-  /**
    * Update challenge progress and emit event
    */
   private async updateChallengeProgress(accountId: string, equity: Decimal) {
@@ -271,19 +252,19 @@ export class RealtimeService {
           profitTarget: progress.rules.profitTarget ? {
             target: progress.rules.profitTarget.requiredProfit,
             current: progress.rules.profitTarget.currentProfit,
-            percentage: parseFloat(progress.rules.profitTarget.progressPercentage),
+            percentage: new Decimal(progress.rules.profitTarget.progressPercentage).toNumber(),
             achieved: progress.rules.profitTarget.completed,
           } : undefined,
           dailyLoss: progress.rules.dailyLoss ? {
             limit: progress.rules.dailyLoss.dailyLossLimit,
             current: progress.rules.dailyLoss.currentDailyLoss,
-            percentage: parseFloat(progress.rules.dailyLoss.usagePercentage),
+            percentage: new Decimal(progress.rules.dailyLoss.usagePercentage).toNumber(),
             breached: progress.rules.dailyLoss.breached,
           } : undefined,
           maxDrawdown: progress.rules.maxDrawdown ? {
             limit: progress.rules.maxDrawdown.maximumAllowedLoss,
             current: progress.rules.maxDrawdown.currentDrawdown,
-            percentage: parseFloat(progress.rules.maxDrawdown.usagePercentage),
+            percentage: new Decimal(progress.rules.maxDrawdown.usagePercentage).toNumber(),
             breached: progress.rules.maxDrawdown.breached,
           } : undefined,
           minTradingDays: progress.rules.minimumTradingDays ? {
@@ -298,6 +279,24 @@ export class RealtimeService {
       }
     } catch (error) {
       this.logger.error(`Error updating challenge progress for ${accountId}: ${(error as Error).message}`);
+    }
+  }
+
+  /**
+   * Update trade unrealizedPnl field
+   * 
+   * Day 14: Persist unrealizedPnl to database for consistency
+   * This runs async and doesn't block real-time updates
+   */
+  private async updateTradeUnrealizedPnl(tradeId: string, unrealizedPnl: Decimal): Promise<void> {
+    try {
+      await this.prisma.trade.update({
+        where: { id: tradeId },
+        data: { unrealizedPnl },
+      });
+    } catch (error) {
+      // Log but don't throw - we don't want to break real-time updates
+      this.logger.debug(`Could not update unrealizedPnl for trade ${tradeId}: ${(error as Error).message}`);
     }
   }
 

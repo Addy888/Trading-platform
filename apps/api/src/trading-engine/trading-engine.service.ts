@@ -9,6 +9,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { MarketPriceService } from '../market-data/market-price.service';
 import { RuleEvaluatorService } from '../rule-evaluator/rule-evaluator.service';
 import { AccountSnapshotsService } from '../account-snapshots/account-snapshots.service';
+import { MinTradingDaysService } from '../risk-engine/min-trading-days.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import {
   TradingAccountStatus,
@@ -41,6 +42,7 @@ export class TradingEngineService {
     private readonly marketPrice: MarketPriceService,
     private readonly ruleEvaluator: RuleEvaluatorService,
     private readonly accountSnapshots: AccountSnapshotsService,
+    private readonly minTradingDays: MinTradingDaysService,
     private readonly eventEmitter: EventEmitter2,
   ) {}
 
@@ -98,17 +100,20 @@ export class TradingEngineService {
       },
     });
 
-    // 7. Recalculate equity
+    // 7. Record trading day (Day 22)
+    await this.minTradingDays.recordTradingDay(tradingAccountId, trade.openedAt);
+
+    // 8. Recalculate equity
     const equity = await this.calculateAccountEquity(tradingAccountId);
     const updatedAccount = await this.prisma.tradingAccount.update({
       where: { id: tradingAccountId },
       data: { equity },
     });
 
-    // 8. Calculate PnL for snapshot
+    // 9. Calculate PnL for snapshot
     const { realizedPnl, unrealizedPnl } = await this.calculateAccountPnl(tradingAccountId);
 
-    // 9. Create snapshot after trade opened
+    // 10. Create snapshot after trade opened
     await this.accountSnapshots.createSnapshot(
       tradingAccountId,
       updatedAccount.currentBalance,
@@ -117,7 +122,7 @@ export class TradingEngineService {
       unrealizedPnl,
     );
 
-    // 10. Evaluate rules
+    // 11. Evaluate rules
     const evaluation = await this.ruleEvaluator.evaluateRules(
       tradingAccountId,
       equity,
@@ -128,7 +133,7 @@ export class TradingEngineService {
       userId,
     );
 
-    // 11. Create audit log
+    // 12. Create audit log
     await this.prisma.auditLog.create({
       data: {
         actorId: userId,

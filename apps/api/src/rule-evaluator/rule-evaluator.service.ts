@@ -4,6 +4,8 @@ import { AccountSnapshotsService } from '../account-snapshots/account-snapshots.
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { TradingAccountStatus, RuleType, TradeStatus } from '@prisma/client';
 import Decimal from 'decimal.js';
+import { DailyLossService } from '../daily-loss/daily-loss.service';
+import { MaxDrawdownService } from '../max-drawdown/max-drawdown.service';
 
 export interface RuleEvaluationResult {
   passed: boolean;
@@ -35,6 +37,8 @@ export class RuleEvaluatorService {
     private readonly prisma: PrismaService,
     private readonly accountSnapshots: AccountSnapshotsService,
     private readonly eventEmitter: EventEmitter2,
+    private readonly dailyLossService: DailyLossService,
+    private readonly maxDrawdownService: MaxDrawdownService,
   ) {}
 
   /**
@@ -117,21 +121,13 @@ export class RuleEvaluatorService {
           break;
 
         case RuleType.MAX_DRAWDOWN:
-          maxDrawdownBreached = this.evaluateMaxDrawdown(
-            currentEquity,
-            account.initialBalance,
-            rule.value,
-            rule.isPercentage,
-          );
+          // Day 6: Use new MaxDrawdownService for precise evaluation
+          maxDrawdownBreached = await this.evaluateMaxDrawdownV2(tradingAccountId);
           break;
 
         case RuleType.DAILY_LOSS:
-          dailyLossBreached = await this.evaluateDailyLoss(
-            tradingAccountId,
-            account.initialBalance,
-            rule.value,
-            rule.isPercentage,
-          );
+          // Day 5: Use new DailyLossService for precise evaluation
+          dailyLossBreached = await this.evaluateDailyLossV2(tradingAccountId);
           break;
 
         case RuleType.MIN_TRADING_DAYS:
@@ -177,20 +173,56 @@ export class RuleEvaluatorService {
 
   /**
    * Evaluate max drawdown rule
+   * 
+   * CRITICAL FIX (Day 3): Now uses High Water Mark (HWM) instead of initial balance
+   * Drawdown = (HWM - CurrentEquity) / HWM * 100
+   * 
+   * This prevents the "profit reset" bug where traders could make profit
+   * and then lose it without breaching drawdown.
+   * 
+   * @deprecated Use evaluateMaxDrawdownV2 instead (Day 6 implementation)
    */
   private evaluateMaxDrawdown(
     currentEquity: Decimal,
-    initialBalance: Decimal,
+    highWaterMark: Decimal,
     maxDrawdownValue: Decimal,
     isPercentage: boolean,
   ): boolean {
-    const loss = initialBalance.minus(currentEquity);
+    // Use HWM as the reference point, not initial balance
+    const loss = highWaterMark.minus(currentEquity);
 
     if (isPercentage) {
-      const lossPercentage = loss.dividedBy(initialBalance).times(100);
+      const lossPercentage = loss.dividedBy(highWaterMark).times(100);
       return lossPercentage.greaterThanOrEqualTo(maxDrawdownValue);
     } else {
       return loss.greaterThanOrEqualTo(maxDrawdownValue);
+    }
+  }
+
+  /**
+   * Evaluate max drawdown rule (Day 6 Implementation)
+   * 
+   * Uses the new MaxDrawdownService for precise evaluation with:
+   * - Pinned rule snapshots
+   * - Static drawdown (from initial balance)
+   * - Trailing drawdown (from HWM)
+   * - Configurable basis (BALANCE or EQUITY)
+   * - Decimal precision throughout
+   */
+  private async evaluateMaxDrawdownV2(tradingAccountId: string): Promise<boolean> {
+    try {
+      const evaluation = await this.maxDrawdownService.evaluateMaxDrawdown(
+        tradingAccountId,
+      );
+      return evaluation.breached;
+    } catch (error) {
+      // If max drawdown evaluation fails (e.g., no rule configured),
+      // default to not breached to preserve existing behavior
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      this.logger.warn(
+        `Max drawdown evaluation failed for ${tradingAccountId}: ${errorMessage}`,
+      );
+      return false;
     }
   }
 
@@ -199,6 +231,8 @@ export class RuleEvaluatorService {
    * 
    * Foundation for daily loss calculation.
    * Uses server timezone for day boundaries.
+   * 
+   * @deprecated Use evaluateDailyLossV2 instead (Day 5 implementation)
    */
   private async evaluateDailyLoss(
     tradingAccountId: string,
@@ -237,6 +271,32 @@ export class RuleEvaluatorService {
       return dailyLossPercentage.greaterThanOrEqualTo(dailyLossLimit);
     } else {
       return dailyLoss.greaterThanOrEqualTo(dailyLossLimit);
+    }
+  }
+
+  /**
+   * Evaluate daily loss rule (Day 5 Implementation)
+   * 
+   * Uses the new DailyLossService for precise evaluation with:
+   * - Pinned rule snapshots
+   * - Configurable daily loss basis (BALANCE or EQUITY)
+   * - Proper unrealized P&L handling
+   * - Decimal precision throughout
+   */
+  private async evaluateDailyLossV2(tradingAccountId: string): Promise<boolean> {
+    try {
+      const evaluation = await this.dailyLossService.evaluateDailyLoss(
+        tradingAccountId,
+      );
+      return evaluation.breached;
+    } catch (error) {
+      // If daily loss evaluation fails (e.g., no rule configured),
+      // default to not breached to preserve existing behavior
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      this.logger.warn(
+        `Daily loss evaluation failed for ${tradingAccountId}: ${errorMessage}`,
+      );
+      return false;
     }
   }
 

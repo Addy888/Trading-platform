@@ -22,6 +22,41 @@ export interface CandleResponse {
   source: string;
 }
 
+export interface TwelveDataQuote {
+  symbol: string;
+  name: string;
+  exchange: string;
+  open: string;
+  high: string;
+  low: string;
+  close: string;
+  datetime: string;
+  is_market_open: boolean;
+}
+
+export interface TwelveDataStatus {
+  configured: boolean;
+  wsStatus: string;
+  subscribedSymbols: string[];
+  lastHeartbeat: string | null;
+  stats: {
+    restRequests: number;
+    restErrors: number;
+    wsMessages: number;
+    wsErrors: number;
+    lastSuccessfulUpdate: string | null;
+    cacheHits: number;
+    cacheMisses: number;
+  };
+  cacheSize: number;
+}
+
+export enum MarketDataSource {
+  SIMULATED = 'SIMULATED',
+  TWELVEDATA = 'TWELVEDATA',
+  ANGELONE_LIVE = 'ANGELONE_LIVE',
+}
+
 async function handleResponse(response: Response) {
   if (!response.ok) {
     let errorData: any;
@@ -71,6 +106,70 @@ export const marketApi = {
   ): Promise<CandleResponse> {
     const response = await fetch(
       `${API_BASE_URL}/market/candles?symbol=${symbol}&timeframe=${timeframe}&limit=${limit}`,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      },
+    );
+    return handleResponse(response);
+  },
+
+  // Twelve Data endpoints
+  /**
+   * Get Twelve Data provider status
+   */
+  async getTwelveDataStatus(token: string): Promise<TwelveDataStatus> {
+    const response = await fetch(`${API_BASE_URL}/market/twelvedata/status`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+    return handleResponse(response);
+  },
+
+  /**
+   * Get real-time quote from Twelve Data
+   */
+  async getTwelveDataQuote(token: string, symbol: string): Promise<{
+    success: boolean;
+    symbol: string;
+    quote: TwelveDataQuote;
+    timestamp: string;
+  }> {
+    const response = await fetch(`${API_BASE_URL}/market/twelvedata/quote/${symbol}`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+    return handleResponse(response);
+  },
+
+  /**
+   * Get historical candles from Twelve Data
+   */
+  async getTwelveDataCandles(
+    token: string,
+    symbol: string,
+    interval: string = '1h',
+    outputsize: number = 100,
+  ): Promise<{
+    success: boolean;
+    symbol: string;
+    interval: string;
+    candles: Array<{
+      timestamp: string;
+      open: string;
+      high: string;
+      low: string;
+      close: string;
+      volume?: string;
+    }>;
+    count: number;
+    timestamp: string;
+  }> {
+    const response = await fetch(
+      `${API_BASE_URL}/market/twelvedata/candles/${symbol}?interval=${interval}&outputsize=${outputsize}`,
       {
         headers: {
           Authorization: `Bearer ${token}`,

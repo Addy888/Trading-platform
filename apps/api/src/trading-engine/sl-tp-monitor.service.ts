@@ -4,6 +4,10 @@ import { MarketDataEngineService, MarketTick } from '../market-data/market-data-
 import { EventEmitter2, OnEvent } from '@nestjs/event-emitter';
 import { TradeStatus, TradeSide } from '@prisma/client';
 import Decimal from 'decimal.js';
+import { BalanceEquityService } from './balance-equity.service';
+import { RiskEvaluationService } from '../risk-engine/risk-evaluation.service';
+import { AccountSnapshotsService } from '../account-snapshots/account-snapshots.service';
+import { InstrumentConfigService } from '../market-data/instrument-config.service';
 
 /**
  * Stop Loss / Take Profit Monitor Service
@@ -16,6 +20,13 @@ import Decimal from 'decimal.js';
  * - Idempotent (prevents double triggers)
  * - Atomic (uses transactions)
  * - Audited (creates audit logs)
+ * - Full risk integration (Day 13 enhancement)
+ * 
+ * Day 13 Enhancements:
+ * - Integrated with BalanceEquityService for complete financial state updates
+ * - Integrated with RiskEvaluationService for post-close risk evaluation
+ * - Creates account snapshots on automatic close
+ * - Supports notification events
  */
 @Injectable()
 export class SlTpMonitorService implements OnModuleInit, OnModuleDestroy {
@@ -27,6 +38,10 @@ export class SlTpMonitorService implements OnModuleInit, OnModuleDestroy {
     private readonly prisma: PrismaService,
     private readonly marketData: MarketDataEngineService,
     private readonly eventEmitter: EventEmitter2,
+    private readonly balanceEquity: BalanceEquityService,
+    private readonly riskEvaluation: RiskEvaluationService,
+    private readonly accountSnapshots: AccountSnapshotsService,
+    private readonly instrumentConfig: InstrumentConfigService,
   ) {
     this.enabled = process.env.SL_TP_MONITOR_ENABLED !== 'false';
   }
@@ -145,6 +160,8 @@ export class SlTpMonitorService implements OnModuleInit, OnModuleDestroy {
 
   /**
    * Execute SL/TP trigger and close position
+   * 
+   * Day 13 Enhancement: Full risk integration matching manual close behavior
    */
   private async executeTrigger(
     trade: any,
@@ -172,8 +189,8 @@ export class SlTpMonitorService implements OnModuleInit, OnModuleDestroy {
         }
 
         // Calculate realized P&L
-        const instrument = await this.getInstrumentConfig(trade.symbol);
-        const contractMultiplier = instrument?.contractMultiplier || 1;
+        const instrument = this.instrumentConfig.getInstrument(trade.symbol);
+        const contractMultiplier = instrument?.contractMultiplier || 100000;
 
         let realizedPnl: Decimal;
         if (trade.side === TradeSide.BUY) {
@@ -188,7 +205,7 @@ export class SlTpMonitorService implements OnModuleInit, OnModuleDestroy {
             .times(contractMultiplier);
         }
 
-        // Update trade
+        // Update trade to CLOSED
         await tx.trade.update({
           where: { id: trade.id },
           data: {
@@ -199,16 +216,38 @@ export class SlTpMonitorService implements OnModuleInit, OnModuleDestroy {
           },
         });
 
-        // Update account balance
-        const newBalance = trade.tradingAccount.currentBalance.plus(realizedPnl);
-        await tx.tradingAccount.update({
-          where: { id: trade.tradingAccountId },
-          data: { currentBalance: newBalance },
-        });
+        // ✅ DAY 13 ENHANCEMENT: Complete financial state update
+        // Use BalanceEquityService to update balance, equity, and HWM
+        const financialState = await this.balanceEquity.updateFinancialStateOnClose(
+          trade.tradingAccountId,
+          realizedPnl,
+          tx,
+        );
+
+        // ✅ DAY 13 ENHANCEMENT: Calculate P&L values for snapshot
+        const totalRealizedPnl = await this.balanceEquity.calculateTotalRealizedPnl(
+          trade.tradingAccountId,
+          tx,
+        );
+        const totalUnrealizedPnl = await this.balanceEquity.calculateTotalUnrealizedPnl(
+          trade.tradingAccountId,
+          tx,
+        );
+
+        // ✅ DAY 13 ENHANCEMENT: Create account snapshot
+        await this.accountSnapshots.createSnapshot(
+          trade.tradingAccountId,
+          financialState.balance,
+          financialState.equity,
+          totalRealizedPnl,
+          totalUnrealizedPnl,
+          tx,
+        );
 
         // Create audit log
         await tx.auditLog.create({
           data: {
+            actorId: null, // System action
             action: reason === 'STOP_LOSS' ? 'SL_TRIGGERED' : 'TP_TRIGGERED',
             entityType: 'Trade',
             entityId: trade.id,
@@ -221,13 +260,41 @@ export class SlTpMonitorService implements OnModuleInit, OnModuleDestroy {
               exitPrice: executionPrice.toString(),
               triggerLevel: (reason === 'STOP_LOSS' ? trade.stopLoss : trade.takeProfit)?.toString(),
               realizedPnl: realizedPnl.toString(),
+              newBalance: financialState.balance.toString(),
+              newEquity: financialState.equity.toString(),
+              hwmUpdated: financialState.hwmUpdated,
             },
           },
         });
 
-        this.logger.log(
-          `${reason} executed for trade ${trade.id} - P&L: ${realizedPnl.toFixed(2)}`,
+        // ✅ DAY 13 ENHANCEMENT: Risk evaluation after close
+        const evaluation = await this.riskEvaluation.evaluateAccount(
+          trade.tradingAccountId,
+          {
+            type: 'TRADE_CLOSE',
+            triggeredBy: 'SYSTEM',
+            metadata: {
+              tradeId: trade.id,
+              symbol: trade.symbol,
+              side: trade.side,
+              closeReason: reason,
+              realizedPnl: realizedPnl.toString(),
+              autoTrigger: true,
+            },
+          },
         );
+
+        // Emit post-evaluation events (breach/pass notifications)
+        this.riskEvaluation.emitPostEvaluationEvents(evaluation);
+
+        this.logger.log(
+          `${reason} executed for trade ${trade.id} - P&L: ${realizedPnl.toFixed(2)}, ` +
+          `Balance: ${financialState.balance.toFixed(2)}, ` +
+          `Equity: ${financialState.equity.toFixed(2)}`,
+        );
+      }, {
+        timeout: 15000, // 15 second timeout
+        maxWait: 5000,  // Wait max 5 seconds for transaction to start
       });
 
       // Emit events (after transaction commits)
@@ -242,7 +309,7 @@ export class SlTpMonitorService implements OnModuleInit, OnModuleDestroy {
         closeReason: reason,
       });
 
-      // Emit notification event
+      // ✅ DAY 13 ENHANCEMENT: Emit notification event for user
       this.eventEmitter.emit('trade.sltp.triggered', {
         tradeId: trade.id,
         userId: trade.tradingAccount.userId,
@@ -256,19 +323,11 @@ export class SlTpMonitorService implements OnModuleInit, OnModuleDestroy {
     } catch (error) {
       this.logger.error(
         `Error executing ${reason} for trade ${trade.id}: ${(error as Error).message}`,
+        error instanceof Error ? error.stack : undefined,
       );
     } finally {
       // Remove from processing set
       this.processingTriggers.delete(trade.id);
     }
-  }
-
-  /**
-   * Get instrument configuration
-   */
-  private async getInstrumentConfig(symbol: string): Promise<any> {
-    // This would normally come from InstrumentConfigService
-    // For now, return default
-    return { contractMultiplier: 100000 };
   }
 }

@@ -9,9 +9,10 @@ async function bootstrap() {
   // Set global API prefix
   app.setGlobalPrefix('api');
   
-  // Enable CORS for frontend AND WebSocket
+  // Enable CORS with environment-based origins
+  const corsOrigins = process.env.CORS_ORIGINS?.split(',').map(origin => origin.trim()) || ['http://localhost:3000'];
   app.enableCors({
-    origin: 'http://localhost:3000',
+    origin: corsOrigins,
     credentials: true,
   });
 
@@ -39,10 +40,13 @@ async function bootstrap() {
   marketPriceService.setSimulatedMarketEngine(simulatedMarketEngine);
   realtimeService.setTradingGateway(tradingGateway);
   
-  await app.listen(3001);
-  console.log('🚀 Backend running on http://localhost:3001');
-  console.log('🔌 WebSocket server running on ws://localhost:3001/trading');
+  const port = process.env.PORT || 3001;
+  await app.listen(port);
+  console.log(`🚀 Backend running on http://localhost:${port}`);
+  console.log(`🔌 WebSocket server running on ws://localhost:${port}/trading`);
   console.log('📈 Simulated market engine enabled');
+  console.log(`🔒 CORS enabled for: ${corsOrigins.join(', ')}`);
+  console.log(`🛡️  Rate limiting enabled (${process.env.RATE_LIMIT_MAX || 100} req/${process.env.RATE_LIMIT_TTL || 60}s)`);
 }
 
 bootstrap();

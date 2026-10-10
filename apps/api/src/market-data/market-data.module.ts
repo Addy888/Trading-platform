@@ -1,23 +1,31 @@
 import { Module } from '@nestjs/common';
+import { ConfigModule } from '@nestjs/config';
 import { MarketPriceService } from './market-price.service';
 import { SimulatedMarketEngineService } from './simulated-market-engine.service';
 import { MarketDataController } from './market-data.controller';
 import { MarketDataEngineService } from './market-data-engine.service';
 import { InstrumentConfigService } from './instrument-config.service';
+import { UnifiedMarketDataService } from './unified-market-data.service';
+import { TwelveDataProvider } from './providers/twelvedata/twelve-data.provider';
 
 @Module({
+  imports: [ConfigModule],
   controllers: [MarketDataController],
   providers: [
     MarketPriceService,
     SimulatedMarketEngineService,
     MarketDataEngineService,
     InstrumentConfigService,
+    UnifiedMarketDataService,
+    TwelveDataProvider,
   ],
   exports: [
     MarketPriceService,
     SimulatedMarketEngineService,
     MarketDataEngineService,
     InstrumentConfigService,
+    UnifiedMarketDataService,
+    TwelveDataProvider,
   ],
 })
 export class MarketDataModule {
