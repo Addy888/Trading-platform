@@ -94,15 +94,34 @@ export function CandlestickChart({ data, symbol, timeframe }: CandlestickChartPr
       if (chartRef.current) {
         chartRef.current.timeScale().fitContent();
       }
+    } else if (candleSeriesRef.current) {
+      // Clear chart when no data
+      candleSeriesRef.current.setData([]);
     }
   }, [data]);
 
   return (
     <div className="relative w-full">
-      <div className="absolute top-2 left-2 z-10 bg-gray-900 bg-opacity-75 px-3 py-1 rounded">
-        <span className="text-white font-semibold">{symbol}</span>
-        <span className="text-gray-400 ml-2 text-sm">{timeframe}</span>
+      <div className="absolute top-2 left-2 z-10 bg-gray-900 bg-opacity-75 px-3 py-2 rounded">
+        <span className="text-white font-semibold text-sm">{symbol}</span>
+        <span className="text-gray-400 ml-2 text-xs">{timeframe}</span>
+        {data.length > 0 && (
+          <span className="text-gray-500 ml-2 text-xs">• {data.length} candles</span>
+        )}
       </div>
+      {data.length === 0 && (
+        <div className="absolute inset-0 flex items-center justify-center bg-gray-950 bg-opacity-50 z-20">
+          <div className="text-center p-6 bg-gray-900 rounded-lg border border-gray-800">
+            <svg className="w-12 h-12 mx-auto text-gray-600 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+            </svg>
+            <p className="text-gray-400 text-sm font-semibold mb-1">No Chart Data Available</p>
+            <p className="text-gray-500 text-xs">
+              Check the market data source or try a different symbol
+            </p>
+          </div>
+        </div>
+      )}
       <div ref={chartContainerRef} className="w-full" />
     </div>
   );

@@ -3,6 +3,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { ConfigService } from '@nestjs/config';
 import Decimal from 'decimal.js';
 import WebSocket from 'ws';
+import { SymbolNormalizer } from '../../utils/symbol-normalizer';
 
 /**
  * Twelve Data Provider Service
@@ -255,9 +256,12 @@ export class TwelveDataProvider implements OnModuleDestroy {
     this.stats.restRequests++;
 
     try {
-      const url = `${this.baseUrl}/quote?symbol=${encodeURIComponent(symbol)}&apikey=${this.apiKey}`;
+      // Normalize symbol to Twelve Data format (EUR/USD with slash)
+      const normalizedSymbol = SymbolNormalizer.toTwelveDataFormat(symbol);
       
-      this.logger.debug(`Fetching quote from: ${this.baseUrl}/quote?symbol=${symbol}&apikey=***`);
+      const url = `${this.baseUrl}/quote?symbol=${encodeURIComponent(normalizedSymbol)}&apikey=${this.apiKey}`;
+      
+      this.logger.debug(`Fetching quote from: ${this.baseUrl}/quote?symbol=${normalizedSymbol}&apikey=*** (input: ${symbol})`);
       
       const response = await fetch(url, {
         method: 'GET',
@@ -304,7 +308,7 @@ export class TwelveDataProvider implements OnModuleDestroy {
       }
 
       this.stats.lastSuccessfulUpdate = new Date();
-      this.logger.debug(`Fetched fresh quote for ${symbol}: ${data.close}`);
+      this.logger.debug(`Fetched fresh quote for ${symbol} (normalized: ${normalizedSymbol}): ${data.close}`);
       return data;
     } catch (error) {
       this.stats.restErrors++;
@@ -355,12 +359,31 @@ export class TwelveDataProvider implements OnModuleDestroy {
       throw new Error('Twelve Data API key not configured');
     }
 
+    // Check circuit breaker
+    if (this.circuitBreakerTripped) {
+      const now = Date.now();
+      if (this.circuitBreakerResetAt && now < this.circuitBreakerResetAt) {
+        const waitSeconds = Math.ceil((this.circuitBreakerResetAt - now) / 1000);
+        throw new Error(`Circuit breaker tripped. Retry after ${waitSeconds} seconds`);
+      } else {
+        this.logger.log('Circuit breaker reset for candles');
+        this.circuitBreakerTripped = false;
+        this.circuitBreakerResetAt = null;
+      }
+    }
+
     this.stats.restRequests++;
 
     try {
-      const url = `${this.baseUrl}/time_series?symbol=${encodeURIComponent(symbol)}&interval=${interval}&outputsize=${outputsize}&apikey=${this.apiKey}`;
+      // Normalize symbol to Twelve Data format (EUR/USD with slash)
+      const normalizedSymbol = SymbolNormalizer.toTwelveDataFormat(symbol);
       
-      this.logger.debug(`Fetching time series from: ${this.baseUrl}/time_series?symbol=${symbol}&interval=${interval}&outputsize=${outputsize}&apikey=***`);
+      // Normalize interval to supported format
+      const normalizedInterval = SymbolNormalizer.normalizeInterval(interval);
+      
+      const url = `${this.baseUrl}/time_series?symbol=${encodeURIComponent(normalizedSymbol)}&interval=${normalizedInterval}&outputsize=${outputsize}&apikey=${this.apiKey}`;
+      
+      this.logger.log(`📊 Fetching candles: symbol=${symbol} (normalized: ${normalizedSymbol}), interval=${interval} (normalized: ${normalizedInterval}), outputsize=${outputsize}`);
       
       const response = await fetch(url, {
         method: 'GET',
@@ -372,27 +395,43 @@ export class TwelveDataProvider implements OnModuleDestroy {
 
       const data: TwelveDataTimeSeriesResponse = await response.json();
       
-      this.logger.debug(`Response for ${symbol} time series: status=${response.status}, hasValues=${!!(data as any).values}`);
+      this.logger.debug(`Response status=${response.status}, hasValues=${!!(data as any).values}, valueCount=${(data as any).values?.length || 0}`);
 
       // Check for HTTP errors
       if (!response.ok) {
         const errorMsg = (data as any).message || (data as any).error || response.statusText;
+        this.logger.error(`❌ Candles HTTP ${response.status} for ${symbol}: ${errorMsg}`);
+        
+        // Check for rate limit error
+        if (response.status === 429 || errorMsg.includes('429') || errorMsg.includes('Rate limit')) {
+          this.handleRateLimitError();
+        }
+        
         throw new Error(`HTTP ${response.status}: ${errorMsg}`);
       }
 
       // Check for API errors (Twelve Data returns 200 with error status)
       if ((data as any).status === 'error') {
-        throw new Error((data as any).message || (data as any).code || 'Unknown API error');
+        const errorMsg = (data as any).message || (data as any).code || 'Unknown API error';
+        this.logger.error(`❌ Candles API error for ${symbol}: ${errorMsg}`);
+        
+        // Check if it's a quota error
+        if (errorMsg.includes('run out of API credits') || errorMsg.includes('quota')) {
+          this.handleRateLimitError();
+        }
+        
+        throw new Error(errorMsg);
       }
 
       // Check for rate limit
       if ((data as any).code === 429 || response.status === 429) {
-        this.logger.warn('Rate limit exceeded');
+        this.logger.warn('⚠️  Rate limit exceeded for candles');
+        this.handleRateLimitError();
         throw new Error('Rate limit exceeded');
       }
 
       if (!data.values || data.values.length === 0) {
-        this.logger.warn(`No time series data for ${symbol} with interval ${interval}`);
+        this.logger.warn(`⚠️  No candles returned for ${symbol} (normalized: ${normalizedSymbol}, interval: ${interval} -> ${normalizedInterval})`);
         return [];
       }
 
@@ -410,12 +449,12 @@ export class TwelveDataProvider implements OnModuleDestroy {
       candles.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
 
       this.stats.lastSuccessfulUpdate = new Date();
-      this.logger.debug(`Fetched ${candles.length} candles for ${symbol}`);
+      this.logger.log(`✅ Fetched ${candles.length} candles for ${symbol} (normalized: ${normalizedSymbol}, interval: ${interval} -> ${normalizedInterval})`);
       return candles;
     } catch (error) {
       this.stats.restErrors++;
       const errorMessage = error instanceof Error ? error.message : String(error);
-      this.logger.error(`Failed to fetch time series for ${symbol}: ${errorMessage}`);
+      this.logger.error(`❌ Failed to fetch candles for ${symbol}: ${errorMessage}`);
       throw error;
     }
   }

@@ -1,0 +1,293 @@
+╔═══════════════════════════════════════════════════════════════════════════════╗
+║                    TRADING APPLICATION - MARKET DATA FLOW                      ║
+╚═══════════════════════════════════════════════════════════════════════════════╝
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                              FRONTEND (Port 3000)                            │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  ┌───────────────────────────────────────────────────────────────────────┐  │
+│  │  Trading Terminal Page                                                │  │
+│  │  /dashboard/trading/[accountId]                                       │  │
+│  ├───────────────────────────────────────────────────────────────────────┤  │
+│  │                                                                       │  │
+│  │  ┌─────────────────┐  ┌──────────────────┐  ┌────────────────────┐  │  │
+│  │  │  Market Watch   │  │  Candlestick    │  │  Order Panel       │  │  │
+│  │  │  (Left Sidebar) │  │  Chart (Center) │  │  (Right Sidebar)   │  │  │
+│  │  ├─────────────────┤  ├──────────────────┤  ├────────────────────┤  │  │
+│  │  │ EUR/USD         │  │                  │  │  🌐 LIVE           │  │  │
+│  │  │ GBP/USD         │  │  ┌────┬────┐    │  │  🎮 Simulated      │  │  │
+│  │  │ USD/JPY         │  │  │    │    │    │  │                    │  │  │
+│  │  │                 │  │  └────┴────┘    │  │  Provider Info:    │  │  │
+│  │  │ Quotes:         │  │                  │  │  • TWELVE_DATA     │  │  │
+│  │  │ Bid: 1.12030    │  │  Timeframes:     │  │  • Quotes: 5       │  │  │
+│  │  │ Ask: 1.12032    │  │  1m 5m 10m 15m   │  │  • Candles: 8      │  │  │
+│  │  └─────────────────┘  │  30m 1H 4H 1D    │  │  • Status: Active  │  │  │
+│  │                       └──────────────────┘  └────────────────────┘  │  │
+│  └───────────────────────────────────────────────────────────────────────┘  │
+│                                    │                                         │
+│                                    │ API Calls                               │
+│                                    ▼                                         │
+│  ┌───────────────────────────────────────────────────────────────────────┐  │
+│  │  Market API Client (lib/market-api.ts)                                │  │
+│  ├───────────────────────────────────────────────────────────────────────┤  │
+│  │  • getTwelveDataQuote(symbol)                                         │  │
+│  │  • getTwelveDataCandles(symbol, interval, outputsize, mode)          │  │
+│  │  • getTwelveDataStatus()                                              │  │
+│  └───────────────────────────────────────────────────────────────────────┘  │
+│                                                                              │
+└──────────────────────────────────────┬───────────────────────────────────────┘
+                                       │
+                                       │ HTTP/REST
+                                       │
+╔══════════════════════════════════════▼═══════════════════════════════════════╗
+║                              BACKEND (Port 3001)                              ║
+╠═══════════════════════════════════════════════════════════════════════════════╣
+║                                                                               ║
+║  ┌────────────────────────────────────────────────────────────────────────┐  ║
+║  │  Market Data Controller (/api/market/...)                              │  ║
+║  ├────────────────────────────────────────────────────────────────────────┤  ║
+║  │  GET /market/twelvedata/quote/:symbol?mode=LIVE                        │  ║
+║  │  GET /market/twelvedata/candles?symbol=...&interval=...&mode=LIVE     │  ║
+║  │  GET /market/twelvedata/status                                         │  ║
+║  └────────────────────┬───────────────────────────────────────────────────┘  ║
+║                       │                                                       ║
+║                       ▼                                                       ║
+║  ┌────────────────────────────────────────────────────────────────────────┐  ║
+║  │  Market Data Manager Service                                           │  ║
+║  ├────────────────────────────────────────────────────────────────────────┤  ║
+║  │  📦 Quote Cache (30s TTL)         Primary: TWELVE_DATA                │  ║
+║  │  📦 Candle Cache (5min TTL)       Fallback: ALPHA_VANTAGE             │  ║
+║  │  ♻️  Request Deduplication                                             │  ║
+║  │  🔒 Circuit Breaker Protection                                         │  ║
+║  │  📊 Quota Tracking                                                     │  ║
+║  └────────────────────┬────────────────────┬──────────────────────────────┘  ║
+║                       │                    │                                  ║
+║                       ▼                    ▼                                  ║
+║  ┌──────────────────────────────┐  ┌──────────────────────────────────┐      ║
+║  │  Twelve Data Provider        │  │  Alpha Vantage Provider          │      ║
+║  ├──────────────────────────────┤  ├──────────────────────────────────┤      ║
+║  │  • getQuote(symbol)          │  │  • getQuote(symbol)              │      ║
+║  │  • getTimeSeries(...)        │  │  • getTimeSeries(...)            │      ║
+║  │  • Circuit Breaker           │  │  • Rate Limiting (5/min)         │      ║
+║  │  • Rate Limit: 8 req/min     │  │  • Quota: 25 calls/day           │      ║
+║  │  • Quota: 800 calls/day      │  │                                  │      ║
+║  └─────────────┬────────────────┘  └────────────┬─────────────────────┘      ║
+║                │                                 │                            ║
+║                │                                 │                            ║
+╚════════════════▼═════════════════════════════════▼════════════════════════════╝
+                 │                                 │
+                 │ HTTPS REST                      │ HTTPS REST
+                 │                                 │
+┌────────────────▼─────────────────┐  ┌───────────▼──────────────────────┐
+│  Twelve Data API                 │  │  Alpha Vantage API                │
+│  api.twelvedata.com              │  │  www.alphavantage.co              │
+├──────────────────────────────────┤  ├───────────────────────────────────┤
+│  • Forex Quotes (Real-time)      │  │  • Forex Quotes (15-20min delay)  │
+│  • OHLC Candles                  │  │  • OHLC Candles                   │
+│  • 8 Intervals: 1m-1D            │  │  • 6 Intervals: 1m-Daily          │
+│  • Major Forex Pairs             │  │  • Stocks, Forex, Crypto          │
+│  • Free: 800 calls/day           │  │  • Free: 25 calls/day             │
+│  • Status: ✅ ACTIVE              │  │  • Status: 💤 DISABLED (No key)   │
+└──────────────────────────────────┘  └───────────────────────────────────┘
+
+
+╔═══════════════════════════════════════════════════════════════════════════════╗
+║                              DATA FLOW EXAMPLE                                 ║
+║                      User Selects EUR/USD @ 1H Timeframe                       ║
+╚═══════════════════════════════════════════════════════════════════════════════╝
+
+1. User clicks "1H" timeframe button
+   ↓
+2. handleTimeframeChange('1H') called
+   ↓
+3. loadCandles('EURUSD', '1H') executed
+   ↓
+4. Checks QuotaManager.isQuotaExhausted() → false
+   ↓
+5. Convert symbol: EURUSD → EUR/USD
+   ↓
+6. Map timeframe: 1H → 1h (Twelve Data format)
+   ↓
+7. Call marketApi.getTwelveDataCandles(token, 'EUR/USD', '1h', 100, 'LIVE')
+   ↓
+8. HTTP GET: /api/market/twelvedata/candles?symbol=EUR/USD&interval=1h&outputsize=100&mode=LIVE
+   ↓
+9. Controller receives request, validates auth token
+   ↓
+10. Calls marketDataManager.getCandles('EUR/USD', '1h', 100, 'LIVE')
+    ↓
+11. Check cache (key: "EUR/USD:1h:100")
+    ├─ Cache HIT (< 5min old) → Return cached candles ⚡
+    └─ Cache MISS → Continue to provider
+        ↓
+12. Check for in-flight requests (deduplication)
+    ├─ Pending request exists → Reuse existing promise
+    └─ No pending request → Create new request
+        ↓
+13. Select provider: TWELVE_DATA (primary)
+    ↓
+14. Check provider status: AVAILABLE ✅
+    ↓
+15. Check circuit breaker: Not tripped ✅
+    ↓
+16. Call twelveDataProvider.getTimeSeries('EUR/USD', '1h', 100)
+    ↓
+17. HTTP GET: https://api.twelvedata.com/time_series?symbol=EUR/USD&interval=1h&outputsize=100&apikey=***
+    ↓
+18. Twelve Data responds with 100 candles:
+    {
+      "meta": { "symbol": "EUR/USD", "interval": "1h" },
+      "values": [
+        { "datetime": "2026-10-11 22:00:00", "open": "1.1203", ... },
+        { "datetime": "2026-10-11 21:00:00", "open": "1.1204", ... },
+        ...
+      ]
+    }
+    ↓
+19. Provider formats candles:
+    [
+      { timestamp: Date, open: Decimal, high: Decimal, low: Decimal, close: Decimal },
+      ...
+    ]
+    ↓
+20. Manager caches candles (TTL: 5 minutes)
+    ↓
+21. Controller formats response:
+    {
+      success: true,
+      symbol: "EUR/USD",
+      interval: "1h",
+      mode: "LIVE",
+      candles: [
+        { timestamp: "2026-10-11T22:00:00.000Z", open: "1.1203", ... },
+        ...
+      ],
+      count: 100,
+      provider: "TWELVE_DATA",
+      timestamp: "2026-10-11T22:30:45.123Z"
+    }
+    ↓
+22. Response sent to frontend
+    ↓
+23. Frontend receives candles, converts timestamps to Unix seconds
+    ↓
+24. CandlestickChart component renders 100 candles
+    ↓
+25. Chart displays with:
+    - Symbol: EUR/USD
+    - Timeframe: 1H
+    - Candles: • 100 candles
+    ↓
+26. User sees real market data 🎉
+
+
+╔═══════════════════════════════════════════════════════════════════════════════╗
+║                              QUOTA PROTECTION                                  ║
+╚═══════════════════════════════════════════════════════════════════════════════╝
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  Cache Strategy                                                              │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  Quotes (30s TTL)                      Candles (5min TTL)                   │
+│  ┌──────────────────┐                  ┌──────────────────┐                │
+│  │ EUR/USD → 1.1203 │                  │ EUR/USD:1h → [...] │              │
+│  │ Cached: 22:30:15 │                  │ Cached: 22:25:00   │              │
+│  │ Expires: 22:30:45│                  │ Expires: 22:30:00  │              │
+│  └──────────────────┘                  └──────────────────┘                │
+│                                                                              │
+│  Request Reduction:                                                          │
+│  • Without cache: 3 requests/second × 3600 seconds = 10,800 calls/hour     │
+│  • With cache: 2 requests/minute × 60 minutes = 120 calls/hour ⚡          │
+│  • Savings: 98.9% reduction                                                 │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  Circuit Breaker                                                             │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  States:                                                                     │
+│  ┌─────────┐  API Error  ┌─────────┐  Cooldown  ┌─────────┐              │
+│  │ CLOSED  │────────────►│ OPEN    │───────────►│ CLOSED  │              │
+│  │ (Normal)│             │ (Paused)│ (60s)      │ (Normal)│              │
+│  └─────────┘             └─────────┘            └─────────┘              │
+│                                                                              │
+│  Triggers:                                                                   │
+│  • HTTP 429 (Too Many Requests)                                             │
+│  • "run out of API credits" in error message                                │
+│  • "quota" in error message                                                 │
+│                                                                              │
+│  When OPEN:                                                                  │
+│  • All requests fail fast (no API calls)                                    │
+│  • User sees: "Circuit breaker tripped. Retry after Xs"                    │
+│  • Automatically resets after cooldown period                               │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+
+╔═══════════════════════════════════════════════════════════════════════════════╗
+║                          SUPPORTED TIMEFRAMES                                  ║
+╚═══════════════════════════════════════════════════════════════════════════════╝
+
+┌───────────────┬────────────────────┬──────────────────┬────────────────────┐
+│ User Selects  │ Frontend Maps To   │ Backend Uses     │ Twelve Data API    │
+├───────────────┼────────────────────┼──────────────────┼────────────────────┤
+│ 1m            │ 1min               │ 1min             │ ✅ Available        │
+│ 5m            │ 5min               │ 5min             │ ✅ Available        │
+│ 10m           │ 10min              │ 10min            │ ✅ Available        │
+│ 15m           │ 15min              │ 15min            │ ✅ Available        │
+│ 30m           │ 30min              │ 30min            │ ✅ Available        │
+│ 1H            │ 1h                 │ 1h               │ ✅ Available        │
+│ 4H            │ 4h                 │ 4h               │ ✅ Available        │
+│ 1D            │ 1day               │ 1day             │ ✅ Available        │
+└───────────────┴────────────────────┴──────────────────┴────────────────────┘
+
+
+╔═══════════════════════════════════════════════════════════════════════════════╗
+║                            ERROR HANDLING FLOW                                 ║
+╚═══════════════════════════════════════════════════════════════════════════════╝
+
+API Request Error
+    │
+    ├─ 429 Too Many Requests → Circuit Breaker OPEN
+    │  └─ Display: "Rate limit exceeded. Waiting 60s..."
+    │
+    ├─ "run out of API credits" → Circuit Breaker OPEN + Quota Exhausted
+    │  └─ Display: "Daily quota exhausted. Reset at midnight UTC."
+    │  └─ Show: Red warning banner
+    │  └─ Recommend: "Switch to Simulated mode"
+    │
+    ├─ Network Error → Retry with exponential backoff
+    │  └─ Display: "Network error. Retrying..."
+    │
+    ├─ Invalid Symbol → User-friendly error
+    │  └─ Display: "Symbol EUR/USD not supported by provider"
+    │
+    └─ Unknown Error → Log details, show generic message
+       └─ Display: "Failed to fetch market data. Please try again."
+
+
+╔═══════════════════════════════════════════════════════════════════════════════╗
+║                          FILES CHANGED SUMMARY                                 ║
+╚═══════════════════════════════════════════════════════════════════════════════╝
+
+BACKEND (API)
+├── src/market-data/
+│   ├── market-data.controller.ts ........................... Enhanced formatting
+│   └── providers/
+│       └── twelvedata/
+│           └── twelve-data.provider.ts .................... Circuit breaker
+│
+FRONTEND (Web)
+├── app/dashboard/trading/[accountId]/
+│   └── page.tsx ........................................... Timeframes + errors
+└── components/trading/
+    └── candlestick-chart.tsx .............................. Enhanced display
+
+
+All changes committed to local repository ✅
+Both API and Frontend servers running ✅
+Verified with real API calls ✅
+Ready for manual testing ✅

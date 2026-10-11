@@ -147,16 +147,20 @@ export const marketApi = {
 
   /**
    * Get historical candles from Twelve Data
+   * 
+   * Changed to use query parameters to handle slashes in forex symbols like EUR/USD
    */
   async getTwelveDataCandles(
     token: string,
     symbol: string,
     interval: string = '1h',
     outputsize: number = 100,
+    mode: 'LIVE' | 'SIMULATED' = 'LIVE',
   ): Promise<{
     success: boolean;
     symbol: string;
     interval: string;
+    mode: string;
     candles: Array<{
       timestamp: string;
       open: string;
@@ -167,9 +171,10 @@ export const marketApi = {
     }>;
     count: number;
     timestamp: string;
+    error?: string;
   }> {
     const response = await fetch(
-      `${API_BASE_URL}/market/twelvedata/candles/${symbol}?interval=${interval}&outputsize=${outputsize}`,
+      `${API_BASE_URL}/market/twelvedata/candles?symbol=${encodeURIComponent(symbol)}&interval=${interval}&outputsize=${outputsize}&mode=${mode}`,
       {
         headers: {
           Authorization: `Bearer ${token}`,

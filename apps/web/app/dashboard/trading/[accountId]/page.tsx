@@ -17,6 +17,7 @@ import { TradesTable } from '@/components/trading/trades-table';
 import { ChallengeProgress } from '@/components/trading/challenge-progress';
 import { ExecutionModeIndicator } from '@/components/trading/execution-mode-indicator';
 import { useTwelveDataQuotes } from '@/hooks/useTwelveDataQuotes';
+import { quotaManager } from '@/lib/quota-manager';
 
 type TabType = 'positions' | 'trades';
 
@@ -54,17 +55,23 @@ export default function TradingTerminalPage() {
   const [symbols, setSymbols] = useState<string[]>([]);
 
   // Twelve Data integration
+  // Only fetch quotes for major FX pairs to respect rate limits and provider support
+  // Twelve Data free tier has limited symbol support - focus on major pairs
+  const twelveDataSymbols = useTwelveData && symbols.length > 0 
+    ? symbols.filter(s => ['EURUSD', 'GBPUSD', 'USDJPY', 'AUDUSD', 'USDCAD'].includes(s))
+    : ['EURUSD', 'GBPUSD', 'USDJPY'];
+    
   const {
     quotes: twelveDataQuotes,
     loading: quotesLoading,
     error: quotesError,
-    lastUpdate: quotesLastUpdate,
-  } = useTwelveDataQuotes({
-    symbols: symbols.length > 0 ? symbols : ['AAPL', 'MSFT', 'GOOGL', 'EURUSD', 'GBPUSD'],
-    accessToken,
-    enabled: useTwelveData && !!accessToken,
-    pollingInterval: 10000, // 10 seconds
-  });
+    providerStatus,
+    quotaExhausted,
+  } = useTwelveDataQuotes(
+    twelveDataSymbols,
+    20000, // 20 seconds polling interval
+    useTwelveData && !!accessToken
+  );
 
   // Load initial data
   useEffect(() => {
@@ -79,26 +86,27 @@ export default function TradingTerminalPage() {
       const convertedQuotes: Record<string, { bid: string; ask: string; spread: string }> = {};
       
       Object.entries(twelveDataQuotes).forEach(([symbol, quoteData]) => {
-        convertedQuotes[symbol] = {
-          bid: quoteData.bid,
-          ask: quoteData.ask,
-          spread: quoteData.spread,
-        };
+        // Extract bid/ask from close price (simulate spread)
+        const closePrice = parseFloat(quoteData.close || quoteData.price || '0');
+        if (closePrice > 0) {
+          const spread = closePrice * 0.0001; // 1 pip spread estimate
+          convertedQuotes[symbol] = {
+            bid: (closePrice - spread / 2).toFixed(5),
+            ask: (closePrice + spread / 2).toFixed(5),
+            spread: spread.toFixed(5),
+          };
+        }
       });
       
       setQuotes(convertedQuotes);
       
-      // Update market status based on quote status
-      const hasLive = Object.values(twelveDataQuotes).some(q => q.status === 'LIVE');
-      const hasStale = Object.values(twelveDataQuotes).some(q => q.status === 'STALE');
-      const hasError = Object.values(twelveDataQuotes).every(q => q.status === 'ERROR' || q.status === 'UNAVAILABLE');
-      
-      if (hasError) {
+      // Update market status based on quota/provider status
+      if (quotaExhausted) {
         setMarketStatus('DISCONNECTED');
-      } else if (hasStale) {
-        setMarketStatus('STALE');
-      } else if (hasLive) {
+      } else if (Object.keys(convertedQuotes).length > 0) {
         setMarketStatus('CONNECTED');
+      } else if (quotesError) {
+        setMarketStatus('DISCONNECTED');
       }
     }
   }, [twelveDataQuotes, useTwelveData]);
@@ -160,11 +168,21 @@ export default function TradingTerminalPage() {
 
     try {
       if (useTwelveData) {
-        // Use Twelve Data candles
+        // Check quota state first
+        if (quotaManager.isQuotaExhausted()) {
+          console.warn('[loadCandles] Quota exhausted, showing empty state');
+          setCandles([]);
+          setError('Market data quota exhausted. Please wait for quota reset or switch to Simulated mode.');
+          return;
+        }
+
+        // Use Twelve Data candles - map timeframes to Twelve Data intervals
         const intervalMap: Record<string, string> = {
           '1m': '1min',
           '5m': '5min',
+          '10m': '10min',
           '15m': '15min',
+          '30m': '30min',
           '1H': '1h',
           '4H': '4h',
           '1D': '1day',
@@ -172,10 +190,22 @@ export default function TradingTerminalPage() {
         
         const interval = intervalMap[timeframe] || '1h';
         
+        // Convert symbol format: EURUSD -> EUR/USD for Twelve Data
+        const twelveDataSymbol = symbol.includes('/') ? symbol : 
+          symbol.length === 6 ? `${symbol.slice(0, 3)}/${symbol.slice(3)}` : symbol;
+        
+        console.log(`[loadCandles] Fetching ${interval} candles for ${twelveDataSymbol}`);
+        
         try {
-          const candleData = await marketApi.getTwelveDataCandles(accessToken, symbol, interval, 100);
+          const candleData = await marketApi.getTwelveDataCandles(
+            accessToken, 
+            twelveDataSymbol, 
+            interval, 
+            100,
+            'LIVE'
+          );
           
-          if (candleData.success && candleData.candles.length > 0) {
+          if (candleData.success && candleData.candles && candleData.candles.length > 0) {
             const formattedCandles = candleData.candles.map((c: any) => ({
               time: Math.floor(new Date(c.timestamp).getTime() / 1000),
               open: parseFloat(c.open),
@@ -184,21 +214,40 @@ export default function TradingTerminalPage() {
               close: parseFloat(c.close),
             }));
             setCandles(formattedCandles);
+            setError(null);
+            console.log(`[loadCandles] ✅ Loaded ${formattedCandles.length} LIVE ${interval} candles for ${twelveDataSymbol} from TWELVE_DATA`);
+          } else if (candleData.error) {
+            // Check for quota exhaustion
+            if (candleData.error.includes('quota') || 
+                candleData.error.includes('Circuit breaker') ||
+                candleData.error.includes('run out of API credits')) {
+              console.error('[loadCandles] Quota exhausted:', candleData.error);
+              setError(`Market data unavailable: ${candleData.error}`);
+              quotaManager.setExhausted('Twelve Data', null, candleData.error);
+            } else {
+              console.warn(`[loadCandles] Error: ${candleData.error}`);
+              setError(`Failed to load chart data: ${candleData.error}`);
+            }
+            setCandles([]);
           } else {
-            console.warn('No candle data available from Twelve Data, using simulated');
-            // Fallback to simulated
-            await loadSimulatedCandles(symbol, timeframe);
+            console.warn(`[loadCandles] No candle data available for ${twelveDataSymbol}`);
+            setError(`No chart data available for ${symbol}`);
+            setCandles([]);
           }
-        } catch (err) {
-          console.error('Failed to load Twelve Data candles, falling back to simulated:', err);
-          await loadSimulatedCandles(symbol, timeframe);
+        } catch (err: any) {
+          console.error('[loadCandles] Failed to load Twelve Data candles:', err);
+          setError(`Failed to fetch chart data: ${err.message}`);
+          setCandles([]);
         }
       } else {
         // Use simulated candles
+        setError(null);
         await loadSimulatedCandles(symbol, timeframe);
       }
-    } catch (err) {
-      console.error('Failed to load candles:', err);
+    } catch (err: any) {
+      console.error('[loadCandles] Error:', err);
+      setError(`Chart error: ${err.message}`);
+      setCandles([]);
     }
   };
 
@@ -561,24 +610,39 @@ export default function TradingTerminalPage() {
           {/* Center: Chart + Positions */}
           <div className="flex-1 flex flex-col">
             {/* Timeframe Selector */}
-            <div className="bg-gray-900 border-b border-gray-800 p-2 flex gap-2">
-              {['1m', '5m', '15m', '1H', '4H', '1D'].map((tf) => (
+            <div className="bg-gray-900 border-b border-gray-800 p-2 flex gap-2 items-center">
+              {['1m', '5m', '10m', '15m', '30m', '1H', '4H', '1D'].map((tf) => (
                 <button
                   key={tf}
                   onClick={() => handleTimeframeChange(tf)}
-                  className={`px-3 py-1 rounded text-sm ${
+                  className={`px-3 py-1 rounded text-sm transition-colors ${
                     selectedTimeframe === tf
                       ? 'bg-blue-600 text-white'
                       : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
                   }`}
+                  disabled={!useTwelveData && !['1H', '4H', '1D'].includes(tf)}
+                  title={!useTwelveData && !['1H', '4H', '1D'].includes(tf) ? 'Only available with LIVE data' : ''}
                 >
                   {tf}
                 </button>
               ))}
+              {error && (
+                <div className="ml-auto text-xs text-red-400 max-w-md truncate" title={error}>
+                  ⚠️ {error}
+                </div>
+              )}
             </div>
 
             {/* Chart */}
-            <div className="flex-1 bg-gray-950 p-4 overflow-hidden">
+            <div className="flex-1 bg-gray-950 p-4 overflow-hidden relative">
+              {quotaExhausted && (
+                <div className="absolute top-4 right-4 z-10 bg-red-900 bg-opacity-90 border border-red-700 rounded px-3 py-2 max-w-sm">
+                  <div className="text-red-200 text-sm font-semibold mb-1">Market Data Quota Exhausted</div>
+                  <div className="text-red-300 text-xs">
+                    {quotaManager.getStatusMessage() || 'Daily API limit reached. Switch to Simulated mode or wait for quota reset.'}
+                  </div>
+                </div>
+              )}
               <CandlestickChart
                 data={candles}
                 symbol={selectedSymbol}
@@ -632,38 +696,60 @@ export default function TradingTerminalPage() {
               <ExecutionModeIndicator mode={executionMode} />
               
               {/* Data Source Toggle */}
-              <div className="mt-3 bg-gray-800 rounded p-2">
-                <div className="text-xs text-gray-400 mb-2">Market Data Source:</div>
+              <div className="mt-3 bg-gray-800 rounded p-3">
+                <div className="text-xs text-gray-400 mb-2 font-semibold">Market Data Source</div>
                 <div className="flex gap-2">
                   <button
                     onClick={() => setUseTwelveData(true)}
-                    className={`flex-1 px-2 py-1 rounded text-xs font-semibold transition-colors ${
+                    className={`flex-1 px-3 py-2 rounded text-xs font-semibold transition-colors ${
                       useTwelveData
-                        ? 'bg-blue-600 text-white'
+                        ? 'bg-green-600 text-white'
                         : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
                     }`}
                   >
-                    LIVE (Twelve Data)
+                    🌐 LIVE
                   </button>
                   <button
                     onClick={() => setUseTwelveData(false)}
-                    className={`flex-1 px-2 py-1 rounded text-xs font-semibold transition-colors ${
+                    className={`flex-1 px-3 py-2 rounded text-xs font-semibold transition-colors ${
                       !useTwelveData
                         ? 'bg-blue-600 text-white'
                         : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
                     }`}
                   >
-                    Simulated
+                    🎮 Simulated
                   </button>
                 </div>
-                {quotesLastUpdate && useTwelveData && (
-                  <div className="mt-2 text-xs text-gray-500">
-                    Last update: {quotesLastUpdate.toLocaleTimeString()}
+                {providerStatus && useTwelveData && (
+                  <div className="mt-3 space-y-1">
+                    <div className="flex justify-between text-xs">
+                      <span className="text-gray-400">Provider:</span>
+                      <span className="text-white font-mono">{providerStatus.primaryProvider}</span>
+                    </div>
+                    <div className="flex justify-between text-xs">
+                      <span className="text-gray-400">Quotes Cached:</span>
+                      <span className="text-white font-mono">{providerStatus.quoteCacheSize}</span>
+                    </div>
+                    <div className="flex justify-between text-xs">
+                      <span className="text-gray-400">Candles Cached:</span>
+                      <span className="text-white font-mono">{providerStatus.candleCacheSize || 0}</span>
+                    </div>
+                    <div className="flex justify-between text-xs">
+                      <span className="text-gray-400">Status:</span>
+                      <span className={`font-semibold ${providerStatus.pollingActive ? 'text-green-400' : 'text-yellow-400'}`}>
+                        {providerStatus.pollingActive ? '🔄 Active' : '⏸️  Paused'}
+                      </span>
+                    </div>
                   </div>
                 )}
                 {quotesError && useTwelveData && (
-                  <div className="mt-2 text-xs text-red-400">
-                    {quotesError}
+                  <div className="mt-2 p-2 bg-red-900 bg-opacity-30 border border-red-700 rounded">
+                    <div className="text-xs text-red-300">{quotesError}</div>
+                  </div>
+                )}
+                {!useTwelveData && (
+                  <div className="mt-2 text-xs text-gray-500 italic">
+                    Using simulated market data. Switch to LIVE for real quotes.
                   </div>
                 )}
               </div>

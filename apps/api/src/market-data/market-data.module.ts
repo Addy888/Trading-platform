@@ -7,6 +7,7 @@ import { MarketDataEngineService } from './market-data-engine.service';
 import { InstrumentConfigService } from './instrument-config.service';
 import { UnifiedMarketDataService } from './unified-market-data.service';
 import { TwelveDataProvider } from './providers/twelvedata/twelve-data.provider';
+import { AlphaVantageProvider } from './providers/alphavantage/alpha-vantage.provider';
 import { MarketDataManagerService } from './market-data-manager.service';
 
 @Module({
@@ -19,6 +20,7 @@ import { MarketDataManagerService } from './market-data-manager.service';
     InstrumentConfigService,
     UnifiedMarketDataService,
     TwelveDataProvider,
+    AlphaVantageProvider,
     MarketDataManagerService,
   ],
   exports: [
@@ -28,6 +30,7 @@ import { MarketDataManagerService } from './market-data-manager.service';
     InstrumentConfigService,
     UnifiedMarketDataService,
     TwelveDataProvider,
+    AlphaVantageProvider,
     MarketDataManagerService,
   ],
 })

@@ -1,204 +1,346 @@
-'use client';
+import { useEffect, useState, useCallback, useRef } from 'react';
+import { quotaManager } from '@/lib/quota-manager';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { marketApi, type TwelveDataQuote } from '@/lib/market-api';
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
 
-export interface QuoteData {
+export interface TwelveDataQuote {
   symbol: string;
-  bid: string;
-  ask: string;
-  spread: string;
-  timestamp: string;
-  isMarketOpen: boolean;
-  status: 'LIVE' | 'DELAYED' | 'STALE' | 'UNAVAILABLE' | 'LOADING' | 'ERROR';
-  source: 'TWELVEDATA' | 'SIMULATED';
+  close?: string;
+  price?: string;
+  timestamp?: number;
+  cached?: boolean;
+  cacheAge?: number;
+  provider?: string;
 }
 
-interface UseTwelveDataQuotesOptions {
-  symbols: string[];
-  accessToken: string | null;
-  enabled?: boolean;
-  pollingInterval?: number; // milliseconds
+interface ProviderStatus {
+  primaryProvider: string;
+  providers: {
+    [key: string]: {
+      status: string;
+      requestCount: number;
+      cacheHits: number;
+      errorCount: number;
+      quotaExhaustedAt: string | null;
+      quotaResetTime: string | null;
+      hoursUntilReset: number | null;
+    };
+  };
+  quoteCacheSize: number;
+  candleCacheSize: number;
+  subscribedSymbols: string[];
+  pollingActive: boolean;
 }
 
-export function useTwelveDataQuotes({
-  symbols,
-  accessToken,
-  enabled = true,
-  pollingInterval = 5000, // 5 seconds default
-}: UseTwelveDataQuotesOptions) {
-  const [quotes, setQuotes] = useState<Record<string, QuoteData>>({});
-  const [loading, setLoading] = useState(true);
+/**
+ * Custom hook to fetch Twelve Data quotes with STRICT quota protection
+ * 
+ * Day 4: Initial implementation
+ * Day 7: Added provider status checking and quota exhaustion handling
+ * Day 7 HOTFIX: Shared quota state, stops ALL polling immediately on exhaustion
+ * 
+ * CRITICAL: Uses shared QuotaManager to coordinate across all components
+ */
+export function useTwelveDataQuotes(
+  symbols: string[],
+  pollingInterval: number = 20000,
+  enabled: boolean = true
+) {
+  const [quotes, setQuotes] = useState<Record<string, TwelveDataQuote>>({});
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
-
-  const pollingTimerRef = useRef<NodeJS.Timeout | null>(null);
-  const abortControllerRef = useRef<AbortController | null>(null);
+  const [providerStatus, setProviderStatus] = useState<ProviderStatus | null>(null);
+  
+  const pollTimerRef = useRef<NodeJS.Timeout | null>(null);
   const isMountedRef = useRef(true);
+  const isPollingRef = useRef(false);
+  const fetchAbortControllerRef = useRef<AbortController | null>(null);
 
-  const fetchQuote = useCallback(
-    async (symbol: string): Promise<QuoteData | null> => {
-      if (!accessToken) return null;
+  /**
+   * CRITICAL: Stop all polling immediately
+   */
+  const stopPolling = useCallback(() => {
+    if (pollTimerRef.current) {
+      clearInterval(pollTimerRef.current);
+      pollTimerRef.current = null;
+    }
+    
+    // Abort any in-flight requests
+    if (fetchAbortControllerRef.current) {
+      fetchAbortControllerRef.current.abort();
+      fetchAbortControllerRef.current = null;
+    }
+    
+    isPollingRef.current = false;
+  }, []);
 
-      try {
-        const result = await marketApi.getTwelveDataQuote(accessToken, symbol);
-
-        if (!result.success || !result.quote) {
-          return {
-            symbol,
-            bid: '0',
-            ask: '0',
-            spread: '0',
-            timestamp: new Date().toISOString(),
-            isMarketOpen: false,
-            status: 'UNAVAILABLE',
-            source: 'TWELVEDATA',
-          };
-        }
-
-        const quote = result.quote;
-        const close = parseFloat(quote.close);
-        
-        // Calculate bid/ask spread (typical Forex spread ~0.0001)
-        const spread = close * 0.0001;
-        const bid = close - spread / 2;
-        const ask = close + spread / 2;
-
-        // Determine status based on market open and data age
-        const dataAge = Date.now() - new Date(quote.datetime).getTime();
-        let status: QuoteData['status'] = 'LIVE';
-        
-        if (!quote.is_market_open) {
-          status = 'DELAYED';
-        } else if (dataAge > 60000) {
-          // Data older than 1 minute considered stale
-          status = 'STALE';
-        }
-
-        return {
-          symbol: quote.symbol,
-          bid: bid.toFixed(5),
-          ask: ask.toFixed(5),
-          spread: spread.toFixed(5),
-          timestamp: quote.datetime,
-          isMarketOpen: quote.is_market_open,
-          status,
-          source: 'TWELVEDATA',
-        };
-      } catch (err: any) {
-        console.error(`Failed to fetch quote for ${symbol}:`, err);
-        return {
-          symbol,
-          bid: '0',
-          ask: '0',
-          spread: '0',
-          timestamp: new Date().toISOString(),
-          isMarketOpen: false,
-          status: 'ERROR',
-          source: 'TWELVEDATA',
-        };
+  /**
+   * Check provider status from backend
+   */
+  const checkProviderStatus = useCallback(async (): Promise<boolean> => {
+    // CRITICAL: Check shared quota state FIRST
+    if (quotaManager.isQuotaExhausted()) {
+      const statusMsg = quotaManager.getStatusMessage();
+      if (statusMsg) {
+        setError(statusMsg);
       }
-    },
-    [accessToken]
-  );
+      return false; // Don't poll
+    }
 
-  const fetchAllQuotes = useCallback(async () => {
-    if (!accessToken || !enabled || symbols.length === 0) {
+    try {
+      const token = localStorage.getItem('accessToken');
+      if (!token) return true;
+
+      const response = await fetch(`${API_BASE_URL}/market/twelvedata/status`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+        signal: AbortSignal.timeout(5000),
+      });
+
+      if (!response.ok) {
+        console.error('[useTwelveDataQuotes] Failed to fetch provider status:', response.status);
+        return true; // Continue polling on error
+      }
+
+      const data: ProviderStatus = await response.json();
+      setProviderStatus(data);
+
+      // Check if primary provider (TWELVE_DATA) is quota exhausted
+      const twelveDataStatus = data.providers?.TWELVE_DATA;
+      if (twelveDataStatus && twelveDataStatus.status === 'QUOTA_EXHAUSTED') {
+        // Parse reset time
+        const resetTime = twelveDataStatus.quotaResetTime 
+          ? new Date(twelveDataStatus.quotaResetTime).getTime()
+          : null;
+
+        // Set shared quota state
+        quotaManager.setExhausted(
+          'Twelve Data',
+          resetTime,
+          `Daily quota exhausted. ${twelveDataStatus.hoursUntilReset !== null ? `Resets in ${twelveDataStatus.hoursUntilReset}h` : 'Wait for quota reset'}`
+        );
+
+        setError(quotaManager.getStatusMessage());
+        
+        // CRITICAL: Stop ALL polling immediately
+        stopPolling();
+        
+        return false;
+      }
+
+      return true; // OK to poll
+    } catch (err: any) {
+      if (err.name !== 'AbortError') {
+        console.error('[useTwelveDataQuotes] Provider status check error:', err);
+      }
+      return true; // Continue polling on error
+    }
+  }, [stopPolling]);
+
+  /**
+   * Fetch quotes for symbols with batching
+   */
+  const fetchQuotes = useCallback(async () => {
+    // CRITICAL: Check shared quota state before ANY request
+    if (quotaManager.isQuotaExhausted()) {
+      setError(quotaManager.getStatusMessage());
+      stopPolling();
+      setLoading(false);
       return;
     }
 
-    // Cancel any ongoing requests
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
+    if (!enabled || symbols.length === 0 || isPollingRef.current) {
+      setLoading(false);
+      return;
     }
 
-    abortControllerRef.current = new AbortController();
+    // Check provider status first
+    const canPoll = await checkProviderStatus();
+    if (!canPoll) {
+      setLoading(false);
+      return;
+    }
+
+    isPollingRef.current = true;
+    setLoading(true);
+    setError(null);
+
+    // Create abort controller for this fetch
+    fetchAbortControllerRef.current = new AbortController();
 
     try {
-      setLoading(true);
-      setError(null);
+      const newQuotes: Record<string, TwelveDataQuote> = {};
+      const batchSize = 2;
+      const batchDelay = 500;
 
-      // Fetch all quotes in parallel (backend caching prevents overload)
-      const quotePromises = symbols.map((symbol) => fetchQuote(symbol));
-      const results = await Promise.all(quotePromises);
+      // Process symbols in batches
+      for (let i = 0; i < symbols.length; i += batchSize) {
+        if (!isMountedRef.current || quotaManager.isQuotaExhausted()) break;
 
-      if (!isMountedRef.current) return;
+        const batch = symbols.slice(i, i + batchSize);
 
-      const newQuotes: Record<string, QuoteData> = {};
-      results.forEach((quoteData) => {
-        if (quoteData) {
-          newQuotes[quoteData.symbol] = quoteData;
+        // Fetch quotes in parallel for current batch
+        const batchPromises = batch.map(async (symbol) => {
+          // Check quota state before each request
+          if (quotaManager.isQuotaExhausted()) {
+            return;
+          }
+
+          try {
+            const token = localStorage.getItem('accessToken');
+            if (!token) return;
+
+            const response = await fetch(
+              `${API_BASE_URL}/market/twelvedata/quote/${symbol}?mode=LIVE`,
+              {
+                headers: {
+                  'Authorization': `Bearer ${token}`,
+                },
+                signal: fetchAbortControllerRef.current?.signal,
+              }
+            );
+
+            if (!response.ok) {
+              if (response.status === 429) {
+                // Don't log individual 429s - will be caught by status check
+                return;
+              }
+              return;
+            }
+
+            const data: {
+              success: boolean;
+              symbol: string;
+              mode: string;
+              quote: TwelveDataQuote;
+              error?: string;
+            } = await response.json();
+
+            if (data.success && data.quote) {
+              newQuotes[symbol] = data.quote;
+            } else if (data.error) {
+              // Check for quota exhaustion in error message
+              if (data.error.includes('quota exhausted') || 
+                  data.error.includes('run out of API credits') ||
+                  data.error.includes('Circuit breaker')) {
+                
+                // Extract reset time if available
+                let resetTime: number | null = null;
+                const match = data.error.match(/(\d+)h from now/);
+                if (match) {
+                  const hours = parseInt(match[1], 10);
+                  resetTime = Date.now() + (hours * 3600000);
+                }
+
+                quotaManager.setExhausted('Twelve Data', resetTime, data.error);
+                setError(quotaManager.getStatusMessage());
+                stopPolling();
+                return;
+              }
+            }
+          } catch (err: any) {
+            if (err.name === 'AbortError') {
+              // Request was aborted - this is expected during cleanup
+              return;
+            }
+            // Don't log - will be caught by status check
+          }
+        });
+
+        await Promise.all(batchPromises);
+
+        // Check quota again before delay
+        if (quotaManager.isQuotaExhausted()) {
+          break;
         }
-      });
 
-      setQuotes(newQuotes);
-      setLastUpdate(new Date());
+        // Add delay between batches
+        if (i + batchSize < symbols.length && isMountedRef.current) {
+          await new Promise(resolve => setTimeout(resolve, batchDelay));
+        }
+      }
+
+      if (isMountedRef.current && Object.keys(newQuotes).length > 0) {
+        setQuotes(newQuotes);
+        setError(null);
+      } else if (isMountedRef.current && Object.keys(newQuotes).length === 0 && !quotaManager.isQuotaExhausted()) {
+        setError('No quotes available');
+      }
     } catch (err: any) {
-      if (!isMountedRef.current) return;
-      if (err.name === 'AbortError') return;
-      
-      console.error('Failed to fetch quotes:', err);
-      setError(err.message || 'Failed to fetch market data');
+      if (err.name !== 'AbortError' && isMountedRef.current) {
+        console.error('[useTwelveDataQuotes] Fetch error:', err);
+        setError(err.message || 'Failed to fetch market data');
+      }
     } finally {
       if (isMountedRef.current) {
         setLoading(false);
       }
+      isPollingRef.current = false;
+      fetchAbortControllerRef.current = null;
     }
-  }, [accessToken, enabled, symbols, fetchQuote]);
+  }, [enabled, symbols, checkProviderStatus, stopPolling]);
 
-  // Initial fetch
+  // Subscribe to shared quota state changes
   useEffect(() => {
-    fetchAllQuotes();
-  }, [fetchAllQuotes]);
+    const unsubscribe = quotaManager.subscribe((state) => {
+      if (state.isExhausted) {
+        setError(quotaManager.getStatusMessage());
+        stopPolling();
+      }
+    });
 
-  // Polling
+    return unsubscribe;
+  }, [stopPolling]);
+
+  // Setup polling (only runs once on mount or when critical deps change)
   useEffect(() => {
-    if (!enabled || !accessToken) {
+    isMountedRef.current = true;
+
+    // Clear existing timer
+    if (pollTimerRef.current) {
+      clearInterval(pollTimerRef.current);
+      pollTimerRef.current = null;
+    }
+
+    if (!enabled || symbols.length === 0) {
+      setLoading(false);
       return;
     }
 
-    // Clear existing timer
-    if (pollingTimerRef.current) {
-      clearTimeout(pollingTimerRef.current);
+    // CRITICAL: Check quota state before starting
+    if (quotaManager.isQuotaExhausted()) {
+      setError(quotaManager.getStatusMessage());
+      setLoading(false);
+      return;
     }
 
-    // Set up polling
-    const poll = () => {
-      fetchAllQuotes();
-      pollingTimerRef.current = setTimeout(poll, pollingInterval);
-    };
+    // Initial fetch
+    fetchQuotes();
 
-    pollingTimerRef.current = setTimeout(poll, pollingInterval);
-
-    return () => {
-      if (pollingTimerRef.current) {
-        clearTimeout(pollingTimerRef.current);
+    // Setup polling interval
+    pollTimerRef.current = setInterval(() => {
+      // Check quota before each poll
+      if (quotaManager.isQuotaExhausted()) {
+        stopPolling();
+        return;
       }
-    };
-  }, [enabled, accessToken, pollingInterval, fetchAllQuotes]);
+      fetchQuotes();
+    }, pollingInterval);
 
-  // Cleanup on unmount
-  useEffect(() => {
+    // Cleanup
     return () => {
       isMountedRef.current = false;
-      if (pollingTimerRef.current) {
-        clearTimeout(pollingTimerRef.current);
-      }
-      if (abortControllerRef.current) {
-        abortControllerRef.current.abort();
-      }
+      stopPolling();
     };
-  }, []);
-
-  const refetch = useCallback(() => {
-    fetchAllQuotes();
-  }, [fetchAllQuotes]);
+  }, [enabled, symbols.join(','), pollingInterval]); // Stable deps - won't cause re-polling
 
   return {
     quotes,
     loading,
     error,
-    lastUpdate,
-    refetch,
+    providerStatus,
+    quotaExhausted: quotaManager.isQuotaExhausted(),
+    refetch: fetchQuotes,
   };
 }

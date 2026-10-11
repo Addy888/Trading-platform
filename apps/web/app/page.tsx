@@ -3,7 +3,14 @@
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
-import Link from 'next/link';
+import { LandingHeader } from '@/components/landing/header';
+import { Hero } from '@/components/landing/hero';
+import { DashboardPreview } from '@/components/landing/dashboard-preview';
+import { MarketsSection } from '@/components/landing/markets-section';
+import { FeaturesSection } from '@/components/landing/features-section';
+import { HowItWorksSection } from '@/components/landing/how-it-works';
+import { CTASection } from '@/components/landing/cta-section';
+import { LandingFooter } from '@/components/landing/footer';
 
 export default function Home() {
   const router = useRouter();
@@ -17,36 +24,25 @@ export default function Home() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <div className="text-gray-600">Loading...</div>
+      <div className="min-h-screen flex items-center justify-center bg-[#070908]">
+        <div className="text-[#F5F7F4]">Loading...</div>
       </div>
     );
   }
 
+  // If user is logged in, they'll be redirected, but show landing page during check
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center px-4">
-      <div className="max-w-4xl w-full text-center">
-        <h1 className="text-5xl font-bold text-gray-900 mb-4">
-          Trading Platform
-        </h1>
-        <p className="text-xl text-gray-600 mb-8">
-          Professional trading platform for modern traders
-        </p>
-        <div className="flex gap-4 justify-center">
-          <Link
-            href="/register"
-            className="px-8 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition-colors shadow-lg"
-          >
-            Get Started
-          </Link>
-          <Link
-            href="/login"
-            className="px-8 py-3 bg-white text-gray-700 rounded-lg font-semibold hover:bg-gray-50 transition-colors shadow-lg border border-gray-200"
-          >
-            Sign In
-          </Link>
-        </div>
-      </div>
+    <div className="min-h-screen bg-[#070908]">
+      <LandingHeader />
+      <main>
+        <Hero />
+        <DashboardPreview />
+        <MarketsSection />
+        <FeaturesSection />
+        <HowItWorksSection />
+        <CTASection />
+      </main>
+      <LandingFooter />
     </div>
   );
 }

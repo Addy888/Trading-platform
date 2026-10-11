@@ -1,6 +1,7 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { TwelveDataProvider } from './providers/twelvedata/twelve-data.provider';
+import { AlphaVantageProvider } from './providers/alphavantage/alpha-vantage.provider';
 import Decimal from 'decimal.js';
 
 /**
@@ -23,7 +24,7 @@ import Decimal from 'decimal.js';
 
 export enum ProviderType {
   TWELVE_DATA = 'TWELVE_DATA',
-  ALPHA_VANTAGE = 'ALPHA_VANTAGE', // Future
+  ALPHA_VANTAGE = 'ALPHA_VANTAGE',
   SIMULATED = 'SIMULATED',
 }
 
@@ -89,6 +90,7 @@ export class MarketDataManagerService implements OnModuleInit {
   constructor(
     private readonly configService: ConfigService,
     private readonly twelveData: TwelveDataProvider,
+    private readonly alphaVantage: AlphaVantageProvider,
   ) {
     // Load configuration
     this.primaryProvider = this.parseProviderType(
@@ -142,6 +144,14 @@ export class MarketDataManagerService implements OnModuleInit {
       cacheHits: 0,
     });
 
+    this.providerStates.set(ProviderType.ALPHA_VANTAGE, {
+      type: ProviderType.ALPHA_VANTAGE,
+      status: this.alphaVantage.isConfigured() ? ProviderStatus.AVAILABLE : ProviderStatus.DISABLED,
+      errorCount: 0,
+      requestCount: 0,
+      cacheHits: 0,
+    });
+
     this.providerStates.set(ProviderType.SIMULATED, {
       type: ProviderType.SIMULATED,
       status: ProviderStatus.AVAILABLE,
@@ -156,7 +166,7 @@ export class MarketDataManagerService implements OnModuleInit {
    */
   private checkQuotaCooldowns(): void {
     const now = Date.now();
-    const providers = [ProviderType.TWELVE_DATA];
+    const providers = [ProviderType.TWELVE_DATA, ProviderType.ALPHA_VANTAGE];
 
     for (const providerType of providers) {
       const state = this.providerStates.get(providerType);
@@ -169,11 +179,24 @@ export class MarketDataManagerService implements OnModuleInit {
           state.status = ProviderStatus.AVAILABLE;
           state.quotaExhaustedAt = undefined;
           state.quotaResetTime = undefined;
+          state.errorCount = 0;
         } else {
           const resetTime = state.quotaResetTime
             ? new Date(state.quotaResetTime).toISOString()
             : 'unknown';
           this.logger.warn(`⚠️  ${providerType} still in quota exhaustion cooldown until ${resetTime}`);
+        }
+      } else if (state.status === ProviderStatus.ERROR) {
+        // Automatically recover from ERROR state after 5 minutes if not quota-related
+        const timeSinceError = state.lastErrorAt ? now - state.lastErrorAt : Infinity;
+        if (timeSinceError > 300000) { // 5 minutes
+          this.logger.log(`🔄 ${providerType} ERROR state expired, resetting to AVAILABLE`);
+          state.status = ProviderStatus.AVAILABLE;
+          state.errorCount = 0;
+          state.lastErrorAt = undefined;
+        } else {
+          const minutesRemaining = Math.ceil((300000 - timeSinceError) / 60000);
+          this.logger.warn(`⚠️  ${providerType} in ERROR state, auto-recovery in ${minutesRemaining}min`);
         }
       }
     }
@@ -226,53 +249,75 @@ export class MarketDataManagerService implements OnModuleInit {
   }
 
   /**
-   * Fetch quote from available provider
+   * Fetch quote from available provider with fallback
    */
   private async fetchQuoteFromProvider(symbol: string): Promise<any> {
-    // Try primary provider
-    if (this.primaryProvider === ProviderType.TWELVE_DATA) {
-      const state = this.providerStates.get(ProviderType.TWELVE_DATA);
-      if (state && state.status === ProviderStatus.AVAILABLE) {
-        try {
-          const data = await this.twelveData.getQuote(symbol);
-          state.requestCount++;
+    const providers = [this.primaryProvider, ProviderType.ALPHA_VANTAGE];
+    let lastError: Error | null = null;
 
-          // Cache the result
-          this.quoteCache.set(symbol, {
-            symbol,
-            data,
-            timestamp: Date.now(),
-            provider: ProviderType.TWELVE_DATA,
-          });
+    for (const providerType of providers) {
+      const state = this.providerStates.get(providerType);
+      
+      if (!state || state.status !== ProviderStatus.AVAILABLE) {
+        this.logger.debug(`Skipping ${providerType}: status=${state?.status}`);
+        continue;
+      }
 
-          this.logger.debug(`✅ Fetched quote for ${symbol} from TWELVE_DATA (request #${state.requestCount})`);
+      try {
+        const data = await this.fetchQuoteFromSpecificProvider(providerType, symbol);
+        state.requestCount++;
 
-          return {
-            ...data,
-            cached: false,
-            provider: ProviderType.TWELVE_DATA,
-          };
-        } catch (error) {
-          this.handleProviderError(ProviderType.TWELVE_DATA, error);
-          throw error;
-        }
-      } else if (state && state.status === ProviderStatus.QUOTA_EXHAUSTED) {
-        const resetTime = state.quotaResetTime
-          ? new Date(state.quotaResetTime).toISOString()
-          : 'unknown';
-        throw new Error(
-          `TWELVE_DATA quota exhausted. Quota resets at ${resetTime}. ` +
-          `Please use SIMULATED mode or wait for quota reset.`
-        );
+        // Cache the result
+        this.quoteCache.set(symbol, {
+          symbol,
+          data,
+          timestamp: Date.now(),
+          provider: providerType,
+        });
+
+        this.logger.debug(`✅ Fetched quote for ${symbol} from ${providerType} (request #${state.requestCount})`);
+
+        return {
+          ...data,
+          cached: false,
+          provider: providerType,
+        };
+      } catch (error) {
+        lastError = error as Error;
+        this.handleProviderError(providerType, error);
+        this.logger.warn(`${providerType} failed for ${symbol}, trying next provider...`);
+        continue;
       }
     }
 
-    // No providers available
+    // No providers succeeded
+    const availableProviders = Array.from(this.providerStates.entries())
+      .filter(([_, state]) => state.status !== ProviderStatus.DISABLED)
+      .map(([type, state]) => `${type}:${state.status}`)
+      .join(', ');
+
     throw new Error(
       `No market data providers available for symbol ${symbol}. ` +
-      `Primary provider ${this.primaryProvider} is ${this.providerStates.get(this.primaryProvider)?.status}. ` +
-      `Please use SIMULATED mode.`
+      `Provider states: ${availableProviders}. ` +
+      `Last error: ${lastError?.message || 'unknown'}. ` +
+      `Please use SIMULATED mode or wait for provider recovery.`
     );
+  }
+
+  /**
+   * Fetch quote from a specific provider
+   */
+  private async fetchQuoteFromSpecificProvider(providerType: ProviderType, symbol: string): Promise<any> {
+    switch (providerType) {
+      case ProviderType.TWELVE_DATA:
+        return await this.twelveData.getQuote(symbol);
+      
+      case ProviderType.ALPHA_VANTAGE:
+        return await this.alphaVantage.getQuote(symbol);
+      
+      default:
+        throw new Error(`Unsupported provider: ${providerType}`);
+    }
   }
 
   /**
@@ -325,7 +370,7 @@ export class MarketDataManagerService implements OnModuleInit {
   }
 
   /**
-   * Fetch candles from available provider
+   * Fetch candles from available provider with fallback
    */
   private async fetchCandlesFromProvider(
     symbol: string,
@@ -333,50 +378,76 @@ export class MarketDataManagerService implements OnModuleInit {
     outputsize: number
   ): Promise<any[]> {
     const cacheKey = `${symbol}:${interval}:${outputsize}`;
+    const providers = [this.primaryProvider, ProviderType.ALPHA_VANTAGE];
+    let lastError: Error | null = null;
 
-    // Try primary provider
-    if (this.primaryProvider === ProviderType.TWELVE_DATA) {
-      const state = this.providerStates.get(ProviderType.TWELVE_DATA);
-      if (state && state.status === ProviderStatus.AVAILABLE) {
-        try {
-          const data = await this.twelveData.getTimeSeries(symbol, interval, outputsize);
-          state.requestCount++;
+    for (const providerType of providers) {
+      const state = this.providerStates.get(providerType);
+      
+      if (!state || state.status !== ProviderStatus.AVAILABLE) {
+        this.logger.debug(`Skipping ${providerType}: status=${state?.status}`);
+        continue;
+      }
 
-          // Cache the result
-          this.candleCache.set(cacheKey, {
-            symbol,
-            interval,
-            data,
-            timestamp: Date.now(),
-            provider: ProviderType.TWELVE_DATA,
-          });
+      try {
+        const data = await this.fetchCandlesFromSpecificProvider(providerType, symbol, interval, outputsize);
+        state.requestCount++;
 
-          this.logger.debug(
-            `✅ Fetched ${data.length} candles for ${symbol} ${interval} from TWELVE_DATA (request #${state.requestCount})`
-          );
+        // Cache the result
+        this.candleCache.set(cacheKey, {
+          symbol,
+          interval,
+          data,
+          timestamp: Date.now(),
+          provider: providerType,
+        });
 
-          return data;
-        } catch (error) {
-          this.handleProviderError(ProviderType.TWELVE_DATA, error);
-          throw error;
-        }
-      } else if (state && state.status === ProviderStatus.QUOTA_EXHAUSTED) {
-        const resetTime = state.quotaResetTime
-          ? new Date(state.quotaResetTime).toISOString()
-          : 'unknown';
-        throw new Error(
-          `TWELVE_DATA quota exhausted. Quota resets at ${resetTime}. ` +
-          `Please use SIMULATED mode or wait for quota reset.`
+        this.logger.debug(
+          `✅ Fetched ${data.length} candles for ${symbol} ${interval} from ${providerType} (request #${state.requestCount})`
         );
+
+        return data;
+      } catch (error) {
+        lastError = error as Error;
+        this.handleProviderError(providerType, error);
+        this.logger.warn(`${providerType} failed for ${symbol} ${interval}, trying next provider...`);
+        continue;
       }
     }
 
-    // No providers available
+    // No providers succeeded
+    const availableProviders = Array.from(this.providerStates.entries())
+      .filter(([_, state]) => state.status !== ProviderStatus.DISABLED)
+      .map(([type, state]) => `${type}:${state.status}`)
+      .join(', ');
+
     throw new Error(
       `No market data providers available for candles ${symbol} ${interval}. ` +
-      `Primary provider ${this.primaryProvider} is ${this.providerStates.get(this.primaryProvider)?.status}. ` +
-      `Please use SIMULATED mode.`
+      `Provider states: ${availableProviders}. ` +
+      `Last error: ${lastError?.message || 'unknown'}. ` +
+      `Please use SIMULATED mode or wait for provider recovery.`
     );
+  }
+
+  /**
+   * Fetch candles from a specific provider
+   */
+  private async fetchCandlesFromSpecificProvider(
+    providerType: ProviderType,
+    symbol: string,
+    interval: string,
+    outputsize: number
+  ): Promise<any[]> {
+    switch (providerType) {
+      case ProviderType.TWELVE_DATA:
+        return await this.twelveData.getTimeSeries(symbol, interval, outputsize);
+      
+      case ProviderType.ALPHA_VANTAGE:
+        return await this.alphaVantage.getTimeSeries(symbol, interval, outputsize);
+      
+      default:
+        throw new Error(`Unsupported provider: ${providerType}`);
+    }
   }
 
   /**
@@ -577,21 +648,38 @@ export class MarketDataManagerService implements OnModuleInit {
   }
 
   /**
-   * Manually reset provider status (for admin use)
+   * Manually reset provider status (for admin use or auto-recovery)
    */
   resetProviderStatus(providerType: ProviderType): void {
     const state = this.providerStates.get(providerType);
     if (state) {
+      const oldStatus = state.status;
       state.status = ProviderStatus.AVAILABLE;
       state.quotaExhaustedAt = undefined;
       state.quotaResetTime = undefined;
       state.errorCount = 0;
-      this.logger.log(`🔄 Manually reset ${providerType} status to AVAILABLE`);
+      state.lastErrorAt = undefined;
+      this.logger.log(`🔄 Manually reset ${providerType} status from ${oldStatus} to AVAILABLE`);
 
       // Restart polling if it was stopped
       if (!this.pollingTimer) {
         this.startPolling();
       }
+    }
+  }
+
+  /**
+   * Force check and auto-recover all providers
+   */
+  autoRecoverProviders(): void {
+    this.logger.log('🔍 Running auto-recovery check for all providers');
+    this.checkQuotaCooldowns();
+    
+    // Also check if provider is configured but marked as error
+    const twelveDataState = this.providerStates.get(ProviderType.TWELVE_DATA);
+    if (twelveDataState && twelveDataState.status === ProviderStatus.ERROR && this.twelveData.isConfigured()) {
+      this.logger.log('🔄 Provider configured but in ERROR state, attempting recovery');
+      this.resetProviderStatus(ProviderType.TWELVE_DATA);
     }
   }
 }

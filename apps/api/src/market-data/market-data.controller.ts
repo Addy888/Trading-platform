@@ -1,9 +1,9 @@
-import { Controller, Get, Param, Query, UseGuards, Post, Body } from '@nestjs/common';
+import { Controller, Get, Param, Query, UseGuards, Post, Body, Logger } from '@nestjs/common';
 import { SkipThrottle } from '@nestjs/throttler';
 import { SimulatedMarketEngineService } from './simulated-market-engine.service';
 import { UnifiedMarketDataService } from './unified-market-data.service';
 import { TwelveDataProvider } from './providers/twelvedata/twelve-data.provider';
-import { MarketDataManagerService } from './market-data-manager.service';
+import { MarketDataManagerService, ProviderType } from './market-data-manager.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { MarketDataSource } from './dto/normalized-tick.dto';
 
@@ -22,6 +22,8 @@ import { MarketDataSource } from './dto/normalized-tick.dto';
  */
 @Controller('market')
 export class MarketDataController {
+  private readonly logger = new Logger(MarketDataController.name);
+
   constructor(
     private readonly marketEngine: SimulatedMarketEngineService,
     private readonly unifiedMarketData: UnifiedMarketDataService,
@@ -239,7 +241,27 @@ export class MarketDataController {
   @UseGuards(JwtAuthGuard)
   @SkipThrottle()
   getTwelveDataStatus() {
+    // Auto-recover providers before returning status
+    this.marketDataManager.autoRecoverProviders();
     return this.marketDataManager.getProviderStatus();
+  }
+
+  /**
+   * Manually reset provider status (admin endpoint)
+   * 
+   * POST /api/market/twelvedata/reset
+   */
+  @Post('twelvedata/reset')
+  @UseGuards(JwtAuthGuard)
+  @SkipThrottle()
+  resetTwelveDataProvider() {
+    this.logger.log('Manual provider reset requested');
+    this.marketDataManager.resetProviderStatus(ProviderType.TWELVE_DATA);
+    return {
+      success: true,
+      message: 'Provider status reset to AVAILABLE',
+      timestamp: new Date(),
+    };
   }
 
   /**
@@ -281,34 +303,60 @@ export class MarketDataController {
    * DAY 4: Get historical candles from Twelve Data
    * DAY 7: Now uses MarketDataManager with caching (5min TTL) and quota tracking
    * 
-   * GET /api/market/twelvedata/candles/:symbol?interval=1h&outputsize=100&mode=LIVE
+   * GET /api/market/twelvedata/candles?symbol=EUR/USD&interval=1h&outputsize=100&mode=LIVE
    * 
+   * Changed from path parameter to query parameter to handle slashes in forex symbols
    * Skip throttle: Manager has request deduplication + 5min cache + quota tracking
+   * 
+   * Supported intervals: 1min, 5min, 10min, 15min, 30min, 1h, 4h, 1day
    */
-  @Get('twelvedata/candles/:symbol')
+  @Get('twelvedata/candles')
   @UseGuards(JwtAuthGuard)
   @SkipThrottle()
   async getTwelveDataCandles(
-    @Param('symbol') symbol: string,
+    @Query('symbol') symbol: string,
     @Query('interval') interval: string = '1h',
     @Query('outputsize') outputsizeStr: string = '100',
     @Query('mode') mode?: string,
   ) {
+    if (!symbol) {
+      return {
+        success: false,
+        error: 'Symbol parameter is required',
+        timestamp: new Date(),
+      };
+    }
+
     try {
       const outputsize = parseInt(outputsizeStr, 10);
       const executionMode = (mode?.toUpperCase() === 'SIMULATED' ? 'SIMULATED' : 'LIVE') as 'LIVE' | 'SIMULATED';
+      
+      this.logger.log(`Fetching candles: symbol=${symbol}, interval=${interval}, outputsize=${outputsize}, mode=${executionMode}`);
+      
       const candles = await this.marketDataManager.getCandles(symbol, interval, outputsize, executionMode);
+      
+      // Format candles for frontend consumption
+      const formattedCandles = candles.map(candle => ({
+        timestamp: candle.timestamp instanceof Date ? candle.timestamp.toISOString() : candle.timestamp,
+        open: candle.open.toString(),
+        high: candle.high.toString(),
+        low: candle.low.toString(),
+        close: candle.close.toString(),
+        volume: candle.volume,
+      }));
       
       return {
         success: true,
         symbol,
         interval,
         mode: executionMode,
-        candles,
-        count: candles.length,
+        candles: formattedCandles,
+        count: formattedCandles.length,
+        provider: 'TWELVE_DATA',
         timestamp: new Date(),
       };
     } catch (error) {
+      this.logger.error(`Candles endpoint error for ${symbol}: ${(error as Error).message}`);
       return {
         success: false,
         symbol,
