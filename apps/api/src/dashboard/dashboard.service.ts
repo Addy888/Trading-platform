@@ -378,7 +378,7 @@ export class DashboardService {
           accountNumber: a.accountNumber,
           user: `${a.user.firstName} ${a.user.lastName}`,
           userEmail: a.user.email,
-          challenge: a.challengePlan.name,
+          challenge: a.challengePlan?.name || 'Direct Funded',
           initialBalance: a.initialBalance.toFixed(2),
           status: a.status,
           createdAt: a.createdAt,

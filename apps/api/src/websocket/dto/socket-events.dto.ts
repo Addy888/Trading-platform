@@ -6,22 +6,6 @@
  */
 
 /**
- * Market Price Update
- */
-export interface MarketPriceEvent {
-  symbol: string;
-  price: string;
-  timestamp: Date;
-  source: string;
-}
-
-export interface MarketPricesEvent {
-  prices: MarketPriceEvent[];
-  timestamp: Date;
-  source: string;
-}
-
-/**
  * Account Update
  */
 export interface AccountUpdateEvent {

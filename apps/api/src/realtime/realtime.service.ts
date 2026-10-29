@@ -23,7 +23,7 @@ import { FinancialCalculations } from '../common/utils/financial-calculations.ut
  * - Emitting WebSocket events
  * 
  * Architecture:
- * - Event-driven (listens to market.prices.updated)
+ * - Event-driven using genuine OANDA market ticks
  * - Efficient querying (only affected accounts)
  * - Batched operations where practical
  */
@@ -51,38 +51,7 @@ export class RealtimeService {
   }
 
   /**
-   * Handle market price updates (legacy - from SimulatedMarketEngineService)
-   * 
-   * This is triggered by SimulatedMarketEngineService
-   */
-  @OnEvent('market.prices.updated')
-  async handleMarketPriceUpdateLegacy(event: {
-    prices: Array<{ symbol: string; price: string }>;
-    timestamp: Date;
-    source: string;
-  }) {
-    try {
-      // Get all symbols that were updated
-      const updatedSymbols = event.prices.map((p) => p.symbol);
-
-      // Find all accounts with open trades for these symbols
-      const affectedAccounts = await this.findAffectedAccounts(updatedSymbols);
-
-      this.logger.debug(
-        `Market update (legacy) for ${updatedSymbols.length} symbols, ${affectedAccounts.length} accounts affected`,
-      );
-
-      // Process each affected account
-      for (const accountId of affectedAccounts) {
-        await this.updateAccountRealtime(accountId);
-      }
-    } catch (error) {
-      this.logger.error(`Error handling market price update (legacy): ${(error as Error).message}`);
-    }
-  }
-
-  /**
-   * Handle market tick updates (new - from MarketDataEngineService)
+   * Handle genuine OANDA market ticks from MarketDataEngineService.
    */
   @OnEvent('market.tick')
   async handleMarketTick(event: {
@@ -160,7 +129,11 @@ export class RealtimeService {
       const positionUpdates = [];
 
       for (const trade of account.trades) {
-        const currentPrice = this.marketPrice.getPrice(trade.symbol);
+        const currentPrice = this.marketPrice.getAvailableExitPrice(trade.symbol, trade.side);
+        if (!currentPrice) {
+          this.logger.debug(`Skipping realtime valuation for ${trade.symbol}; no fresh OANDA close-side quote.`);
+          return;
+        }
         const instrument = this.instrumentConfig.getInstrument(trade.symbol);
         const contractMultiplier = instrument?.contractMultiplier || 1;
         

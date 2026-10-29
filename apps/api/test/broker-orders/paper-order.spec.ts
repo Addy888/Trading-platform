@@ -1,9 +1,8 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { PaperOrderAdapter } from '../../src/broker-orders/adapters/paper-order.adapter';
 import { PrismaService } from '../../src/prisma/prisma.service';
-import { UnifiedMarketDataService } from '../../src/market-data/unified-market-data.service';
+import { MarketDataEngineService } from '../../src/market-data/market-data-engine.service';
 import { BrokerOrderStatus } from '../../src/broker-orders/dto/order-response.dto';
-import { MarketDataSource } from '../../src/market-data/dto/normalized-tick.dto';
 import Decimal from 'decimal.js';
 
 /**
@@ -14,7 +13,7 @@ import Decimal from 'decimal.js';
 describe('PaperOrderAdapter', () => {
   let adapter: PaperOrderAdapter;
   let prismaService: PrismaService;
-  let marketDataService: UnifiedMarketDataService;
+  let marketDataService: MarketDataEngineService;
 
   // Mock order data
   const mockOrderId = 'test-order-123';
@@ -50,20 +49,6 @@ describe('PaperOrderAdapter', () => {
 
   // Mock market data response
   const mockMarketPrice = new Decimal(1.12015);
-  const mockQuoteResponse = {
-    symbol: 'EUR/USD',
-    source: MarketDataSource.TWELVEDATA,
-    tick: {
-      symbol: 'EUR/USD',
-      source: MarketDataSource.TWELVEDATA,
-      lastTradedPrice: mockMarketPrice,
-      receivedAt: new Date(),
-      connectionStatus: 'CONNECTED',
-      isStale: false,
-    },
-    available: true,
-  };
-
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -81,9 +66,10 @@ describe('PaperOrderAdapter', () => {
           },
         },
         {
-          provide: UnifiedMarketDataService,
+          provide: MarketDataEngineService,
           useValue: {
-            getQuote: jest.fn().mockReturnValue(mockQuoteResponse),
+            getMidPrice: jest.fn().mockReturnValue(mockMarketPrice),
+            isMarketAvailable: jest.fn().mockReturnValue(true),
           },
         },
       ],
@@ -91,7 +77,7 @@ describe('PaperOrderAdapter', () => {
 
     adapter = module.get<PaperOrderAdapter>(PaperOrderAdapter);
     prismaService = module.get<PrismaService>(PrismaService);
-    marketDataService = module.get<UnifiedMarketDataService>(UnifiedMarketDataService);
+    marketDataService = module.get<MarketDataEngineService>(MarketDataEngineService);
 
     // Reset mocks
     jest.clearAllMocks();
@@ -122,10 +108,8 @@ describe('PaperOrderAdapter', () => {
       await adapter.executePaperOrder(mockOrderId);
 
       // Verify market data was queried
-      expect(marketDataService.getQuote).toHaveBeenCalledWith(
-        'EUR/USD',
-        MarketDataSource.TWELVEDATA
-      );
+      expect(marketDataService.getMidPrice).toHaveBeenCalledWith('EUR/USD');
+      expect(marketDataService.isMarketAvailable).toHaveBeenCalledWith('EUR/USD');
     });
 
     it('should handle missing order gracefully', async () => {
@@ -195,13 +179,8 @@ describe('PaperOrderAdapter', () => {
   describe('Market Data Integration', () => {
     it('should handle missing market data by rejecting order', async () => {
       // Mock unavailable market data
-      jest.spyOn(marketDataService, 'getQuote').mockReturnValue({
-        symbol: 'EUR/USD',
-        source: MarketDataSource.TWELVEDATA,
-        tick: null,
-        available: false,
-        reason: 'Data not available',
-      });
+      jest.spyOn(marketDataService, 'getMidPrice').mockReturnValue(null);
+      jest.spyOn(marketDataService, 'isMarketAvailable').mockReturnValue(false);
 
       await adapter.executePaperOrder(mockOrderId);
 

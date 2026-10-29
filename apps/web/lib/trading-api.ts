@@ -1,3 +1,5 @@
+import { authenticatedFetch } from './authenticated-fetch';
+
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
 
 async function handleResponse(response: Response) {
@@ -16,18 +18,20 @@ async function handleResponse(response: Response) {
 export interface TradingAccount {
   id: string;
   userId: string;
-  challengePlanId: string;
-  orderId: string;
+  challengePlanId?: string | null;
+  orderId?: string | null;
   ruleSetId: string;
   accountNumber: string;
   initialBalance: string;
   currentBalance: string;
   equity: string;
   status: string;
+  stage?: string;
+  executionMode?: string;
   startedAt?: string;
   createdAt: string;
   updatedAt: string;
-  challengePlan: {
+  challengePlan?: {
     id: string;
     name: string;
     description?: string;
@@ -35,7 +39,7 @@ export interface TradingAccount {
     price: string;
     currency: string;
     status: string;
-  };
+  } | null;
   ruleSet?: any;
 }
 
@@ -45,12 +49,12 @@ export interface OpenPosition {
   side: 'BUY' | 'SELL';
   volume: string;
   entryPrice: string;
-  currentPrice: string;
-  unrealizedPnl: string;
+  currentPrice: string | null;
+  unrealizedPnl: string | null;
   stopLoss?: string;
   takeProfit?: string;
   openedAt: string;
-  priceSource: string;
+  priceSource: string | null;
 }
 
 export interface Trade {
@@ -130,7 +134,7 @@ export const tradingApi = {
    * Get user's trading accounts
    */
   async getTradingAccounts(token: string): Promise<TradingAccount[]> {
-    const response = await fetch(`${API_BASE_URL}/trading-accounts`, {
+    const response = await authenticatedFetch(`${API_BASE_URL}/trading-accounts`, token, {
       headers: {
         Authorization: `Bearer ${token}`,
       },
@@ -139,10 +143,28 @@ export const tradingApi = {
   },
 
   /**
+   * Create a new direct wallet-funded trading account
+   */
+  async createTradingAccount(
+    token: string,
+    data?: { initialFundingAmount?: string | number },
+  ): Promise<TradingAccount> {
+    const response = await authenticatedFetch(`${API_BASE_URL}/trading-accounts`, token, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(data || {}),
+    });
+    return handleResponse(response);
+  },
+
+  /**
    * Get specific trading account
    */
   async getTradingAccount(token: string, accountId: string): Promise<TradingAccount> {
-    const response = await fetch(`${API_BASE_URL}/trading-accounts/${accountId}`, {
+    const response = await authenticatedFetch(`${API_BASE_URL}/trading-accounts/${accountId}`, token, {
       headers: {
         Authorization: `Bearer ${token}`,
       },
@@ -157,8 +179,9 @@ export const tradingApi = {
     token: string,
     accountId: string,
   ): Promise<AccountPerformance> {
-    const response = await fetch(
+    const response = await authenticatedFetch(
       `${API_BASE_URL}/trading-accounts/${accountId}/performance`,
+      token,
       {
         headers: {
           Authorization: `Bearer ${token}`,
@@ -172,8 +195,9 @@ export const tradingApi = {
    * Get open positions
    */
   async getOpenPositions(token: string, accountId: string): Promise<OpenPosition[]> {
-    const response = await fetch(
+    const response = await authenticatedFetch(
       `${API_BASE_URL}/trading-accounts/${accountId}/positions`,
+      token,
       {
         headers: {
           Authorization: `Bearer ${token}`,
@@ -200,8 +224,9 @@ export const tradingApi = {
     if (params.limit) queryParams.append('limit', params.limit.toString());
     if (params.status) queryParams.append('status', params.status);
 
-    const response = await fetch(
+    const response = await authenticatedFetch(
       `${API_BASE_URL}/trading-accounts/${accountId}/trades?${queryParams}`,
+      token,
       {
         headers: {
           Authorization: `Bearer ${token}`,
@@ -219,8 +244,9 @@ export const tradingApi = {
     accountId: string,
     trade: OpenTradeRequest,
   ): Promise<Trade> {
-    const response = await fetch(
+    const response = await authenticatedFetch(
       `${API_BASE_URL}/trading-accounts/${accountId}/trades`,
+      token,
       {
         method: 'POST',
         headers: {
@@ -237,8 +263,9 @@ export const tradingApi = {
    * Close a trade
    */
   async closeTrade(token: string, accountId: string, tradeId: string): Promise<Trade> {
-    const response = await fetch(
+    const response = await authenticatedFetch(
       `${API_BASE_URL}/trading-accounts/${accountId}/trades/${tradeId}/close`,
+      token,
       {
         method: 'POST',
         headers: {
@@ -256,8 +283,9 @@ export const tradingApi = {
     token: string,
     accountId: string,
   ): Promise<ChallengeProgress> {
-    const response = await fetch(
+    const response = await authenticatedFetch(
       `${API_BASE_URL}/trading-accounts/${accountId}/progress`,
+      token,
       {
         headers: {
           Authorization: `Bearer ${token}`,

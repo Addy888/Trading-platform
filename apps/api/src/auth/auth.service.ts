@@ -36,6 +36,13 @@ export class AuthService {
         lastName: registerDto.lastName,
         phone: registerDto.phone || null,
         country: registerDto.country || null,
+        wallet: {
+          create: {
+            currency: 'USD',
+            balance: 0,
+            lockedBalance: 0,
+          },
+        },
       },
       select: {
         id: true,

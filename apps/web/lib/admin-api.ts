@@ -99,7 +99,6 @@ export interface AuditLog {
 export interface HealthStatus {
   database: string;
   websocket: string;
-  simulatedMarket: string;
   notifications: string;
   timestamp: string;
 }

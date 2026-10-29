@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { MarketPriceService } from '../market-data/market-price.service';
+import { InstrumentConfigService } from '../market-data/instrument-config.service';
 import { RuleEvaluatorService } from '../rule-evaluator/rule-evaluator.service';
 import { AccountSnapshotsService } from '../account-snapshots/account-snapshots.service';
 import { MinTradingDaysService } from '../risk-engine/min-trading-days.service';
@@ -40,6 +41,7 @@ export class TradingEngineService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly marketPrice: MarketPriceService,
+    private readonly instrumentConfig: InstrumentConfigService,
     private readonly ruleEvaluator: RuleEvaluatorService,
     private readonly accountSnapshots: AccountSnapshotsService,
     private readonly minTradingDays: MinTradingDaysService,
@@ -83,7 +85,7 @@ export class TradingEngineService {
     }
 
     // 5. Get current market price
-    const entryPrice = this.marketPrice.getPrice(dto.symbol);
+    const entryPrice = this.marketPrice.getEntryPrice(dto.symbol, dto.side);
 
     // 6. Create trade
     const trade = await this.prisma.trade.create({
@@ -206,7 +208,7 @@ export class TradingEngineService {
       }
 
       // 6. Get current market price
-      const exitPrice = this.marketPrice.getPrice(trade.symbol);
+      const exitPrice = this.marketPrice.getExitPrice(trade.symbol, trade.side);
 
       // 7. Calculate realized PnL
       const realizedPnl = this.calculateRealizedPnl(
@@ -214,6 +216,7 @@ export class TradingEngineService {
         trade.entryPrice,
         exitPrice,
         trade.volume,
+        this.getContractMultiplier(trade.symbol),
       );
 
       // 8. Update trade
@@ -307,15 +310,16 @@ export class TradingEngineService {
     entryPrice: Decimal,
     exitPrice: Decimal,
     volume: Decimal,
+    contractMultiplier = this.CONTRACT_MULTIPLIER,
   ): Decimal {
     let pnl: Decimal;
 
     if (side === TradeSide.BUY) {
       // BUY: profit when price goes up
-      pnl = exitPrice.minus(entryPrice).times(volume).times(this.CONTRACT_MULTIPLIER);
+      pnl = exitPrice.minus(entryPrice).times(volume).times(contractMultiplier);
     } else {
       // SELL: profit when price goes down
-      pnl = entryPrice.minus(exitPrice).times(volume).times(this.CONTRACT_MULTIPLIER);
+      pnl = entryPrice.minus(exitPrice).times(volume).times(contractMultiplier);
     }
 
     return pnl;
@@ -329,16 +333,37 @@ export class TradingEngineService {
     entryPrice: Decimal,
     currentPrice: Decimal,
     volume: Decimal,
+    contractMultiplier = this.CONTRACT_MULTIPLIER,
   ): Decimal {
     let pnl: Decimal;
 
     if (side === TradeSide.BUY) {
-      pnl = currentPrice.minus(entryPrice).times(volume).times(this.CONTRACT_MULTIPLIER);
+      pnl = currentPrice.minus(entryPrice).times(volume).times(contractMultiplier);
     } else {
-      pnl = entryPrice.minus(currentPrice).times(volume).times(this.CONTRACT_MULTIPLIER);
+      pnl = entryPrice.minus(currentPrice).times(volume).times(contractMultiplier);
     }
 
     return pnl;
+  }
+
+  calculateTradeUnrealizedPnl(trade: {
+    symbol: string;
+    side: TradeSide;
+    entryPrice: Decimal;
+    volume: Decimal;
+  }, currentPrice: Decimal): Decimal {
+    return this.calculateUnrealizedPnl(
+      trade.side,
+      trade.entryPrice,
+      currentPrice,
+      trade.volume,
+      this.getContractMultiplier(trade.symbol),
+    );
+  }
+
+  private getContractMultiplier(symbol: string): number {
+    return this.instrumentConfig.getInstrument(symbol)?.contractMultiplier
+      || this.CONTRACT_MULTIPLIER;
   }
 
   /**
@@ -369,13 +394,8 @@ export class TradingEngineService {
 
     // Add unrealized PnL from open trades
     for (const trade of account.trades) {
-      const currentPrice = this.marketPrice.getPrice(trade.symbol);
-      const unrealizedPnl = this.calculateUnrealizedPnl(
-        trade.side,
-        trade.entryPrice,
-        currentPrice,
-        trade.volume,
-      );
+      const currentPrice = this.marketPrice.getExitPrice(trade.symbol, trade.side);
+      const unrealizedPnl = this.calculateTradeUnrealizedPnl(trade, currentPrice);
       equity = equity.plus(unrealizedPnl);
     }
 
@@ -410,13 +430,8 @@ export class TradingEngineService {
     // Calculate unrealized PnL
     let unrealizedPnl = new Decimal(0);
     for (const trade of account.trades.filter((t) => t.status === TradeStatus.OPEN)) {
-      const currentPrice = this.marketPrice.getPrice(trade.symbol);
-      const pnl = this.calculateUnrealizedPnl(
-        trade.side,
-        trade.entryPrice,
-        currentPrice,
-        trade.volume,
-      );
+      const currentPrice = this.marketPrice.getExitPrice(trade.symbol, trade.side);
+      const pnl = this.calculateTradeUnrealizedPnl(trade, currentPrice);
       unrealizedPnl = unrealizedPnl.plus(pnl);
     }
 
@@ -454,13 +469,8 @@ export class TradingEngineService {
     // Calculate unrealized PnL
     let totalUnrealizedPnl = new Decimal(0);
     for (const trade of account.trades.filter((t) => t.status === TradeStatus.OPEN)) {
-      const currentPrice = this.marketPrice.getPrice(trade.symbol);
-      const unrealizedPnl = this.calculateUnrealizedPnl(
-        trade.side,
-        trade.entryPrice,
-        currentPrice,
-        trade.volume,
-      );
+      const currentPrice = this.marketPrice.getExitPrice(trade.symbol, trade.side);
+      const unrealizedPnl = this.calculateTradeUnrealizedPnl(trade, currentPrice);
       totalUnrealizedPnl = totalUnrealizedPnl.plus(unrealizedPnl);
     }
 
@@ -510,13 +520,10 @@ export class TradingEngineService {
     });
 
     return openTrades.map((trade) => {
-      const currentPrice = this.marketPrice.getPrice(trade.symbol);
-      const unrealizedPnl = this.calculateUnrealizedPnl(
-        trade.side,
-        trade.entryPrice,
-        currentPrice,
-        trade.volume,
-      );
+      const currentPrice = this.marketPrice.getAvailableExitPrice(trade.symbol, trade.side);
+      const unrealizedPnl = currentPrice
+        ? this.calculateTradeUnrealizedPnl(trade, currentPrice)
+        : null;
 
       return {
         id: trade.id,
@@ -524,12 +531,12 @@ export class TradingEngineService {
         side: trade.side,
         volume: trade.volume.toString(),
         entryPrice: trade.entryPrice.toString(),
-        currentPrice: currentPrice.toString(),
-        unrealizedPnl: unrealizedPnl.toFixed(2),
+        currentPrice: currentPrice?.toString() ?? null,
+        unrealizedPnl: unrealizedPnl?.toFixed(2) ?? null,
         stopLoss: trade.stopLoss?.toString(),
         takeProfit: trade.takeProfit?.toString(),
         openedAt: trade.openedAt,
-        priceSource: this.marketPrice.getPriceSource(),
+        priceSource: currentPrice ? this.marketPrice.getPriceSource() : null,
       };
     });
   }

@@ -6,9 +6,9 @@ import { useAuth } from '@/lib/auth-context';
 import { useSocket } from '@/lib/socket-context';
 import { ProtectedRoute } from '@/components/protected-route';
 import { tradingApi, type OpenPosition, type Trade } from '@/lib/trading-api';
-import { tradingV2Api, type MarketQuote, type MarginInfo } from '@/lib/trading-v2-api';
+import { tradingV2Api, type MarginInfo } from '@/lib/trading-v2-api';
 import { tradingAccountsApi, type TradingAccount } from '@/lib/trading-accounts-api';
-import { marketApi } from '@/lib/market-api';
+import { marketApi, OandaMarketDataError } from '@/lib/market-api';
 import { MarketWatch } from '@/components/trading/market-watch';
 import { OrderPanel } from '@/components/trading/order-panel';
 import { CandlestickChart } from '@/components/trading/candlestick-chart';
@@ -16,61 +16,74 @@ import { PositionsTable } from '@/components/trading/positions-table';
 import { TradesTable } from '@/components/trading/trades-table';
 import { ChallengeProgress } from '@/components/trading/challenge-progress';
 import { ExecutionModeIndicator } from '@/components/trading/execution-mode-indicator';
-import { useTwelveDataQuotes } from '@/hooks/useTwelveDataQuotes';
-import { quotaManager } from '@/lib/quota-manager';
+import { useOandaQuotes } from '@/hooks/useOandaQuotes';
 
 type TabType = 'positions' | 'trades';
+const DEFAULT_OANDA_SYMBOLS = ['EURUSD', 'GBPUSD', 'USDJPY', 'AUDUSD', 'USDCAD'];
+const OANDA_WATCH_SYMBOLS = new Set(DEFAULT_OANDA_SYMBOLS);
 
 export default function TradingTerminalPage() {
   const params = useParams();
   const router = useRouter();
   const { accessToken } = useAuth();
-  const { socket, connected: socketConnected } = useSocket();
+  const { socket, connected: socketConnected, authenticated: socketAuthenticated } = useSocket();
 
   const accountId = params.accountId as string;
   const reconnectAttemptedRef = useRef(false);
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const candleRequestRef = useRef(0);
+  const candleRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const candleRetryAttemptRef = useRef(0);
+  const marketDataEnabledRef = useRef(false);
 
   // Core State
   const [account, setAccount] = useState<TradingAccount | null>(null);
   const [positions, setPositions] = useState<OpenPosition[]>([]);
   const [trades, setTrades] = useState<Trade[]>([]);
-  const [quotes, setQuotes] = useState<Record<string, { bid: string; ask: string; spread: string }>>({});
+  const [quotes, setQuotes] = useState<Record<string, { bid: string; ask: string; spread: string; price: string; timestamp: string }>>({});
   const [marginInfo, setMarginInfo] = useState<MarginInfo | null>(null);
+  const [marginError, setMarginError] = useState<string | null>(null);
   const [challengeProgress, setChallengeProgress] = useState<any>(null);
   
   // Execution mode state
   const [executionMode, setExecutionMode] = useState<'SIMULATED' | 'PAPER' | 'BROKER_SANDBOX' | 'LIVE'>('SIMULATED');
-  const [useTwelveData, setUseTwelveData] = useState(true);
   
   // Chart State
   const [selectedSymbol, setSelectedSymbol] = useState('EURUSD');
   const [selectedTimeframe, setSelectedTimeframe] = useState('1H');
   const [candles, setCandles] = useState<Array<{ time: number; open: number; high: number; low: number; close: number }>>([]);
+  const [chartError, setChartError] = useState<string | null>(null);
   
   // UI State
   const [activeTab, setActiveTab] = useState<TabType>('positions');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [marketStatus, setMarketStatus] = useState<'CONNECTED' | 'DISCONNECTED' | 'STALE'>('DISCONNECTED');
-  const [symbols, setSymbols] = useState<string[]>([]);
+  const [symbols, setSymbols] = useState<string[]>(DEFAULT_OANDA_SYMBOLS);
+  const [marketDataEnabled, setMarketDataEnabled] = useState(false);
+  const [accountSpecificPricingAvailable, setAccountSpecificPricingAvailable] = useState(false);
+  const [oandaSetupMessage, setOandaSetupMessage] = useState<string | null>(null);
 
-  // Twelve Data integration
-  // Only fetch quotes for major FX pairs to respect rate limits and provider support
-  // Twelve Data free tier has limited symbol support - focus on major pairs
-  const twelveDataSymbols = useTwelveData && symbols.length > 0 
-    ? symbols.filter(s => ['EURUSD', 'GBPUSD', 'USDJPY', 'AUDUSD', 'USDCAD'].includes(s))
-    : ['EURUSD', 'GBPUSD', 'USDJPY'];
-    
+  const stopMarketDataAfterTerminalError = (error: unknown) => {
+    if (
+      error instanceof OandaMarketDataError &&
+      ['NOT_CONFIGURED', 'INVALID_CREDENTIALS', 'ACCOUNT_ACCESS', 'SESSION_EXPIRED'].includes(error.category || '')
+    ) {
+      marketDataEnabledRef.current = false;
+      setMarketDataEnabled(false);
+    }
+  };
+
   const {
-    quotes: twelveDataQuotes,
+    quotes: oandaQuotes,
     loading: quotesLoading,
     error: quotesError,
-    providerStatus,
-    quotaExhausted,
-  } = useTwelveDataQuotes(
-    twelveDataSymbols,
-    20000, // 20 seconds polling interval
-    useTwelveData && !!accessToken
+    refresh: refreshOandaQuotes,
+  } = useOandaQuotes(
+    symbols,
+    20000,
+    accessToken || undefined,
+    marketDataEnabled && accountSpecificPricingAvailable,
   );
 
   // Load initial data
@@ -80,36 +93,74 @@ export default function TradingTerminalPage() {
     }
   }, [accessToken, accountId]);
 
-  // Sync Twelve Data quotes to local state
-  useEffect(() => {
-    if (useTwelveData && Object.keys(twelveDataQuotes).length > 0) {
-      const convertedQuotes: Record<string, { bid: string; ask: string; spread: string }> = {};
-      
-      Object.entries(twelveDataQuotes).forEach(([symbol, quoteData]) => {
-        // Extract bid/ask from close price (simulate spread)
-        const closePrice = parseFloat(quoteData.close || quoteData.price || '0');
-        if (closePrice > 0) {
-          const spread = closePrice * 0.0001; // 1 pip spread estimate
-          convertedQuotes[symbol] = {
-            bid: (closePrice - spread / 2).toFixed(5),
-            ask: (closePrice + spread / 2).toFixed(5),
-            spread: spread.toFixed(5),
-          };
-        }
-      });
-      
-      setQuotes(convertedQuotes);
-      
-      // Update market status based on quota/provider status
-      if (quotaExhausted) {
-        setMarketStatus('DISCONNECTED');
-      } else if (Object.keys(convertedQuotes).length > 0) {
-        setMarketStatus('CONNECTED');
-      } else if (quotesError) {
-        setMarketStatus('DISCONNECTED');
+  const loadOandaMarketData = async () => {
+    if (!accessToken) return;
+    marketDataEnabledRef.current = false;
+    setMarketDataEnabled(false);
+    try {
+      const status = await marketApi.getOandaStatus(accessToken);
+      const provider = status.providers.OANDA;
+      setAccountSpecificPricingAvailable(status.configuration.accountSpecificPricingAvailable);
+      const setupMessages: string[] = [];
+      if (!status.configuration.configured) {
+        const missing = status.configuration.missingVariables.length
+          ? status.configuration.missingVariables.join(', ')
+          : 'OANDA_API_TOKEN';
+        setupMessages.push(
+          `Missing ${missing} in apps/api/.env. Configure it for the selected OANDA ${status.configuration.environment} environment, then restart the backend.`,
+        );
+      } else if (provider.errorCategory === 'INVALID_CREDENTIALS') {
+        setupMessages.push(
+          `OANDA rejected OANDA_API_TOKEN for the ${status.configuration.environment} environment. Configure a valid token for this environment in apps/api/.env, then restart the backend.`,
+        );
       }
+      if (!status.configuration.accountIdConfigured) {
+        setupMessages.push(
+          'OANDA_ACCOUNT_ID is not configured. Historical candles do not require it; account-specific Bid/Ask quotes, position valuation, and new orders do. Use the actual OANDA account ID for this environment, not the application trading account ID.',
+        );
+      }
+      setOandaSetupMessage(setupMessages.length ? setupMessages.join(' ') : null);
+      const blockedCategories = ['NOT_CONFIGURED', 'INVALID_CREDENTIALS', 'ACCOUNT_ACCESS'];
+      if (!status.configuration.configured || blockedCategories.includes(provider.errorCategory || '')) {
+        setCandles([]);
+        setChartError(
+          provider.lastError ||
+          'OANDA candle data is unavailable. Configure a valid OANDA_API_TOKEN in apps/api/.env for the selected environment, then restart the backend.',
+        );
+        return;
+      }
+
+      marketDataEnabledRef.current = true;
+      setMarketDataEnabled(true);
+      let availableSymbols = DEFAULT_OANDA_SYMBOLS;
+      if (status.configuration.accountIdConfigured) {
+        const instruments = await marketApi.getOandaInstruments(accessToken);
+        availableSymbols = instruments
+          .map((instrument) => instrument.replace('_', ''))
+          .filter((symbol) => OANDA_WATCH_SYMBOLS.has(symbol));
+      }
+      if (!availableSymbols.length) {
+        setSymbols([]);
+        setCandles([]);
+        setChartError('No supported OANDA instruments are available for this account.');
+        return;
+      }
+      setSymbols(availableSymbols);
+      const symbol = availableSymbols.includes(selectedSymbol) ? selectedSymbol : availableSymbols[0];
+      if (symbol !== selectedSymbol) setSelectedSymbol(symbol);
+      await loadCandles(symbol, selectedTimeframe);
+    } catch (instrumentError) {
+      stopMarketDataAfterTerminalError(instrumentError);
+      if (instrumentError instanceof Error) setChartError(instrumentError.message);
+      else setChartError('OANDA market data is temporarily unavailable. Please retry later.');
     }
-  }, [twelveDataQuotes, useTwelveData]);
+  };
+
+  useEffect(() => {
+    setQuotes(oandaQuotes);
+    if (Object.keys(oandaQuotes).length > 0) setMarketStatus('CONNECTED');
+    else if (quotesError) setMarketStatus('DISCONNECTED');
+  }, [oandaQuotes, quotesError]);
 
   const loadAllData = async () => {
     if (!accessToken) return;
@@ -118,182 +169,110 @@ export default function TradingTerminalPage() {
       setLoading(true);
       setError(null);
 
-      // Load account details
-      const accountData = await tradingAccountsApi.getUserAccount(accessToken, accountId);
-      setAccount(accountData);
+      // Load account details first - this is separate from market data
+      try {
+        const accountData = await tradingAccountsApi.getUserAccount(accessToken, accountId);
+        setAccount(accountData);
+      } catch (accountErr: any) {
+        // Account loading errors are authorization issues, not market data issues
+        console.error('Failed to load account:', accountErr);
+        if (accountErr.message?.includes('Access denied') || accountErr.message?.includes('Forbidden')) {
+          setError('Access denied: This trading account belongs to another user.');
+        } else if (accountErr.message?.includes('not found')) {
+          setError('Trading account not found.');
+        } else {
+          setError(accountErr.message || 'Failed to load trading account');
+        }
+        setLoading(false);
+        return; // Stop here if account can't be loaded
+      }
 
-      // Load positions
-      const positionsData = await tradingApi.getOpenPositions(accessToken, accountId);
-      setPositions(positionsData);
+      // Now load market data and trading data (can fail independently)
+      try {
+        // Load positions
+        const positionsData = await tradingApi.getOpenPositions(accessToken, accountId);
+        setPositions(positionsData);
 
-      // Load trades
-      const tradesData = await tradingApi.getTradeHistory(accessToken, accountId, { limit: 50 });
-      setTrades(tradesData.trades);
+        // Load trades
+        const tradesData = await tradingApi.getTradeHistory(accessToken, accountId, { limit: 50 });
+        setTrades(tradesData.trades);
 
-      // Load instruments and quotes
-      const instrumentsData = await tradingV2Api.getInstruments(accessToken, accountId);
-      const symbolsList = instrumentsData.instruments.map(i => i.symbol);
-      setSymbols(symbolsList);
+        // Margin depends on fresh market quotes; its failure must not block unrelated account data.
+        try {
+          const marginData = await tradingV2Api.getMarginInfo(accessToken, accountId);
+          setMarginInfo(marginData);
+          setMarginError(null);
+        } catch (marginErr) {
+          setMarginInfo(null);
+          setMarginError(marginErr instanceof Error ? marginErr.message : 'Margin is unavailable until fresh OANDA quotes arrive.');
+        }
 
-      // Load quotes
-      const quotesData = await tradingV2Api.getMarketQuotes(accessToken, accountId);
-      const quotesMap: Record<string, { bid: string; ask: string; spread: string }> = {};
-      quotesData.quotes.forEach((q: MarketQuote) => {
-        quotesMap[q.symbol] = { bid: q.bid, ask: q.ask, spread: q.spread };
-      });
-      setQuotes(quotesMap);
-      setMarketStatus(quotesData.status as any);
+        // Load challenge progress even when margin cannot be valued.
+        const progressData = await tradingApi.getChallengeProgress(accessToken, accountId);
+        setChallengeProgress(progressData);
 
-      // Load margin info
-      const marginData = await tradingV2Api.getMarginInfo(accessToken, accountId);
-      setMarginInfo(marginData);
+      } catch (marketDataErr: any) {
+        console.error('Trading data loading error (non-fatal):', marketDataErr);
+      }
 
-      // Load challenge progress
-      const progressData = await tradingApi.getChallengeProgress(accessToken, accountId);
-      setChallengeProgress(progressData);
-
-      // Load candles for selected symbol
-      await loadCandles(selectedSymbol, selectedTimeframe);
+      await loadOandaMarketData();
 
     } catch (err: any) {
+      // Only general errors that weren't caught above
       console.error('Failed to load trading data:', err);
-      setError(err.message || 'Failed to load trading data');
+      if (!account) {
+        setError(err.message || 'Failed to load trading data');
+      }
     } finally {
       setLoading(false);
     }
   };
 
   const loadCandles = async (symbol: string, timeframe: string) => {
-    if (!accessToken) return;
-
+    if (!accessToken || !marketDataEnabledRef.current) return;
+    if (candleRetryTimerRef.current) clearTimeout(candleRetryTimerRef.current);
+    const requestId = ++candleRequestRef.current;
+    setCandles([]);
+    setChartError(null);
+    const intervalMap: Record<string, string> = { '1m': '1m', '5m': '5m', '10m': '10m', '15m': '15m', '30m': '30m', '1H': '1h', '4H': '4h', '1D': '1d' };
     try {
-      if (useTwelveData) {
-        // Check quota state first
-        if (quotaManager.isQuotaExhausted()) {
-          console.warn('[loadCandles] Quota exhausted, showing empty state');
-          setCandles([]);
-          setError('Market data quota exhausted. Please wait for quota reset or switch to Simulated mode.');
-          return;
-        }
-
-        // Use Twelve Data candles - map timeframes to Twelve Data intervals
-        const intervalMap: Record<string, string> = {
-          '1m': '1min',
-          '5m': '5min',
-          '10m': '10min',
-          '15m': '15min',
-          '30m': '30min',
-          '1H': '1h',
-          '4H': '4h',
-          '1D': '1day',
-        };
-        
-        const interval = intervalMap[timeframe] || '1h';
-        
-        // Convert symbol format: EURUSD -> EUR/USD for Twelve Data
-        const twelveDataSymbol = symbol.includes('/') ? symbol : 
-          symbol.length === 6 ? `${symbol.slice(0, 3)}/${symbol.slice(3)}` : symbol;
-        
-        console.log(`[loadCandles] Fetching ${interval} candles for ${twelveDataSymbol}`);
-        
-        try {
-          const candleData = await marketApi.getTwelveDataCandles(
-            accessToken, 
-            twelveDataSymbol, 
-            interval, 
-            100,
-            'LIVE'
-          );
-          
-          if (candleData.success && candleData.candles && candleData.candles.length > 0) {
-            const formattedCandles = candleData.candles.map((c: any) => ({
-              time: Math.floor(new Date(c.timestamp).getTime() / 1000),
-              open: parseFloat(c.open),
-              high: parseFloat(c.high),
-              low: parseFloat(c.low),
-              close: parseFloat(c.close),
-            }));
-            setCandles(formattedCandles);
-            setError(null);
-            console.log(`[loadCandles] ✅ Loaded ${formattedCandles.length} LIVE ${interval} candles for ${twelveDataSymbol} from TWELVE_DATA`);
-          } else if (candleData.error) {
-            // Check for quota exhaustion
-            if (candleData.error.includes('quota') || 
-                candleData.error.includes('Circuit breaker') ||
-                candleData.error.includes('run out of API credits')) {
-              console.error('[loadCandles] Quota exhausted:', candleData.error);
-              setError(`Market data unavailable: ${candleData.error}`);
-              quotaManager.setExhausted('Twelve Data', null, candleData.error);
-            } else {
-              console.warn(`[loadCandles] Error: ${candleData.error}`);
-              setError(`Failed to load chart data: ${candleData.error}`);
-            }
-            setCandles([]);
-          } else {
-            console.warn(`[loadCandles] No candle data available for ${twelveDataSymbol}`);
-            setError(`No chart data available for ${symbol}`);
-            setCandles([]);
-          }
-        } catch (err: any) {
-          console.error('[loadCandles] Failed to load Twelve Data candles:', err);
-          setError(`Failed to fetch chart data: ${err.message}`);
-          setCandles([]);
-        }
-      } else {
-        // Use simulated candles
-        setError(null);
-        await loadSimulatedCandles(symbol, timeframe);
-      }
+      const result = await marketApi.getOandaCandles(accessToken, symbol, intervalMap[timeframe] || '1h', 100);
+      if (!result.success || !result.candles.length) throw new Error(result.error || 'OANDA returned no candles.');
+      if (requestId !== candleRequestRef.current) return;
+      candleRetryAttemptRef.current = 0;
+      setCandles(result.candles.map((c) => ({ time: Math.floor(new Date(c.timestamp).getTime() / 1000), open: Number(c.open), high: Number(c.high), low: Number(c.low), close: Number(c.close) })));
+      setMarketStatus('CONNECTED');
+      setChartError(null);
     } catch (err: any) {
-      console.error('[loadCandles] Error:', err);
-      setError(`Chart error: ${err.message}`);
+      if (requestId !== candleRequestRef.current) return;
+      stopMarketDataAfterTerminalError(err);
       setCandles([]);
+      setChartError(err.message || 'OANDA market data is temporarily unavailable. Please retry later.');
+      if (
+        err instanceof OandaMarketDataError &&
+        err.retryable &&
+        candleRetryAttemptRef.current < 3
+      ) {
+        const attempt = ++candleRetryAttemptRef.current;
+        const exponentialDelay = Math.min(2000 * (2 ** (attempt - 1)), 30000);
+        const retryAfter = Math.min(err.retryAfterMs || 0, 120000);
+        candleRetryTimerRef.current = setTimeout(
+          () => void loadCandles(symbol, timeframe),
+          Math.max(exponentialDelay, retryAfter),
+        );
+      }
     }
   };
 
-  const loadSimulatedCandles = async (symbol: string, timeframe: string) => {
-    if (!accessToken) return;
-    
-    try {
-      const candleData = await marketApi.getCandles(accessToken, symbol, timeframe, 100);
-      const formattedCandles = candleData.candles.map((c: any) => ({
-        time: c.time,
-        open: c.open,
-        high: c.high,
-        low: c.low,
-        close: c.close,
-      }));
-      setCandles(formattedCandles);
-    } catch (err) {
-      console.error('Failed to load simulated candles:', err);
-    }
-  };
-
+  useEffect(() => () => {
+    if (candleRetryTimerRef.current) clearTimeout(candleRetryTimerRef.current);
+    candleRequestRef.current++;
+  }, []);
   // WebSocket subscription
   useEffect(() => {
-    if (socket && socketConnected && accountId) {
+    if (socket && socketConnected && socketAuthenticated && accountId) {
       // Subscribe to account updates
       socket.emit('subscribe:account', { accountId });
-
-      // Listen for market price updates
-      socket.on('market:price', (data: any) => {
-        if (data.prices) {
-          setQuotes((prev) => {
-            const updated = { ...prev };
-            data.prices.forEach((p: any) => {
-              // Assuming market:price event has bid/ask or we calculate from price
-              const price = parseFloat(p.price);
-              const spread = 0.0001; // Default spread
-              updated[p.symbol] = {
-                bid: (price - spread / 2).toFixed(5),
-                ask: (price + spread / 2).toFixed(5),
-                spread: spread.toFixed(5),
-              };
-            });
-            return updated;
-          });
-        }
-      });
 
       // Listen for position updates
       socket.on('position:update', () => {
@@ -327,7 +306,6 @@ export default function TradingTerminalPage() {
 
       return () => {
         socket.emit('unsubscribe:account', { accountId });
-        socket.off('market:price');
         socket.off('position:update');
         socket.off('trade:opened');
         socket.off('trade:closed');
@@ -335,14 +313,14 @@ export default function TradingTerminalPage() {
         socket.off('challenge:update');
       };
     }
-  }, [socket, socketConnected, accountId]);
+  }, [socket, socketConnected, socketAuthenticated, accountId]);
 
   // Handle reconnection
   useEffect(() => {
     if (socket && socketConnected && accountId && !reconnectAttemptedRef.current) {
       reconnectAttemptedRef.current = true;
       // Refetch data after reconnection
-      setTimeout(() => {
+      reconnectTimerRef.current = setTimeout(() => {
         refreshPositions();
         refreshAccount();
         loadCandles(selectedSymbol, selectedTimeframe);
@@ -351,6 +329,12 @@ export default function TradingTerminalPage() {
     if (!socketConnected) {
       reconnectAttemptedRef.current = false;
     }
+    return () => {
+      if (reconnectTimerRef.current) {
+        clearTimeout(reconnectTimerRef.current);
+        reconnectTimerRef.current = null;
+      }
+    };
   }, [socketConnected, accountId, socket]);
 
   const refreshPositions = async () => {
@@ -388,8 +372,10 @@ export default function TradingTerminalPage() {
     try {
       const marginData = await tradingV2Api.getMarginInfo(accessToken, accountId);
       setMarginInfo(marginData);
+      setMarginError(null);
     } catch (err) {
-      console.error('Failed to refresh margin:', err);
+      setMarginInfo(null);
+      setMarginError(err instanceof Error ? err.message : 'Margin is unavailable until fresh OANDA quotes arrive.');
     }
   };
 
@@ -468,20 +454,17 @@ export default function TradingTerminalPage() {
 
   const handleSymbolChange = (symbol: string) => {
     setSelectedSymbol(symbol);
-    loadCandles(symbol, selectedTimeframe);
   };
 
   const handleTimeframeChange = (timeframe: string) => {
     setSelectedTimeframe(timeframe);
-    loadCandles(selectedSymbol, timeframe);
   };
 
-  // Reload candles when data source changes
   useEffect(() => {
     if (selectedSymbol && selectedTimeframe && accessToken) {
       loadCandles(selectedSymbol, selectedTimeframe);
     }
-  }, [useTwelveData]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [selectedSymbol, selectedTimeframe, accessToken]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (loading) {
     return (
@@ -526,7 +509,26 @@ export default function TradingTerminalPage() {
     ? 'Account suspended by administrator'
     : 'Trading not available';
 
-  const selectedQuote = quotes[selectedSymbol] || { bid: '0', ask: '0', spread: '0' };
+  const selectedQuote = quotes[selectedSymbol];
+  const quoteTimestamp = selectedQuote ? Date.parse(selectedQuote.timestamp) : Number.NaN;
+  const selectedQuoteIsFresh = Boolean(
+    selectedQuote &&
+    Number.isFinite(quoteTimestamp) &&
+    Date.now() - quoteTimestamp >= 0 &&
+    Date.now() - quoteTimestamp <= 45000 &&
+    Number.isFinite(Number(selectedQuote.bid)) &&
+    Number.isFinite(Number(selectedQuote.ask)) &&
+    Number(selectedQuote.bid) > 0 &&
+    Number(selectedQuote.ask) >= Number(selectedQuote.bid),
+  );
+  const marketDataAvailable = selectedQuoteIsFresh;
+  const orderDisabledReason = canTrade
+    ? marketDataAvailable
+      ? undefined
+      : accountSpecificPricingAvailable
+        ? 'A fresh OANDA bid/ask quote is required before placing an order. Wait for a valid quote; stale quotes cannot be used.'
+        : oandaSetupMessage || 'OANDA_ACCOUNT_ID is required for account-specific bid/ask pricing, position valuation, and new orders. Historical candles remain available without it.'
+    : disabledReason;
 
   return (
     <ProtectedRoute requireRole="USER">
@@ -547,18 +549,18 @@ export default function TradingTerminalPage() {
                 <div className="text-xs text-gray-400">Equity</div>
                 <div className="font-semibold">${parseFloat(account.equity).toFixed(2)}</div>
               </div>
-              {marginInfo && (
-                <>
-                  <div>
-                    <div className="text-xs text-gray-400">Free Margin</div>
-                    <div className="font-semibold text-green-400">${parseFloat(marginInfo.freeMargin).toFixed(2)}</div>
-                  </div>
-                  <div>
-                    <div className="text-xs text-gray-400">Used Margin</div>
-                    <div className="font-semibold text-yellow-400">${parseFloat(marginInfo.usedMargin).toFixed(2)}</div>
-                  </div>
-                </>
-              )}
+              <div title={marginError || undefined}>
+                <div className="text-xs text-gray-400">Free Margin</div>
+                <div className={`font-semibold ${marginInfo ? 'text-green-400' : 'text-amber-300'}`}>
+                  {marginInfo ? `$${parseFloat(marginInfo.freeMargin).toFixed(2)}` : 'Unavailable'}
+                </div>
+              </div>
+              <div title={marginError || undefined}>
+                <div className="text-xs text-gray-400">Used Margin</div>
+                <div className={`font-semibold ${marginInfo ? 'text-yellow-400' : 'text-amber-300'}`}>
+                  {marginInfo ? `$${parseFloat(marginInfo.usedMargin).toFixed(2)}` : 'Unavailable'}
+                </div>
+              </div>
               <div>
                 <div className="text-xs text-gray-400">Status</div>
                 <span
@@ -571,6 +573,12 @@ export default function TradingTerminalPage() {
                   }`}
                 >
                   {account.status}
+                </span>
+              </div>
+              <div>
+                <div className="text-xs text-gray-400">Mode</div>
+                <span className="px-2 py-0.5 rounded text-xs font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 uppercase tracking-wider font-mono">
+                  {account.executionMode || 'SIMULATED'}
                 </span>
               </div>
             </div>
@@ -593,6 +601,12 @@ export default function TradingTerminalPage() {
           </div>
         </div>
 
+        {marginError && (
+          <div className="border-b border-amber-800 bg-amber-950/40 px-4 py-2 text-sm text-amber-200" role="status">
+            Margin and unrealized P&amp;L valuation are unavailable until fresh OANDA bid/ask quotes are available. {marginError}
+          </div>
+        )}
+
         {/* Main Trading Area */}
         <div className="flex-1 flex overflow-hidden">
           {/* Left: Market Watch */}
@@ -603,7 +617,8 @@ export default function TradingTerminalPage() {
               selectedSymbol={selectedSymbol}
               onSymbolSelect={handleSymbolChange}
               loading={quotesLoading}
-              dataSource={useTwelveData ? 'TWELVEDATA' : 'SIMULATED'}
+              dataSource={Object.keys(quotes).length > 0 ? 'OANDA' : undefined}
+              unavailableMessage={quotesError || oandaSetupMessage}
             />
           </div>
 
@@ -620,33 +635,38 @@ export default function TradingTerminalPage() {
                       ? 'bg-blue-600 text-white'
                       : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
                   }`}
-                  disabled={!useTwelveData && !['1H', '4H', '1D'].includes(tf)}
-                  title={!useTwelveData && !['1H', '4H', '1D'].includes(tf) ? 'Only available with LIVE data' : ''}
                 >
                   {tf}
                 </button>
               ))}
-              {error && (
-                <div className="ml-auto text-xs text-red-400 max-w-md truncate" title={error}>
-                  ⚠️ {error}
+              {(chartError || quotesError) && (
+                <div className="ml-auto flex items-center gap-2 min-w-0">
+                  <span className="text-xs text-red-400 truncate" title={chartError || quotesError || undefined}>
+                    ⚠️ {chartError || quotesError}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void loadOandaMarketData();
+                      if (marketDataEnabledRef.current) refreshOandaQuotes();
+                    }}
+                    className="text-xs text-blue-400 hover:text-blue-300"
+                  >
+                    Retry
+                  </button>
                 </div>
               )}
             </div>
 
             {/* Chart */}
             <div className="flex-1 bg-gray-950 p-4 overflow-hidden relative">
-              {quotaExhausted && (
-                <div className="absolute top-4 right-4 z-10 bg-red-900 bg-opacity-90 border border-red-700 rounded px-3 py-2 max-w-sm">
-                  <div className="text-red-200 text-sm font-semibold mb-1">Market Data Quota Exhausted</div>
-                  <div className="text-red-300 text-xs">
-                    {quotaManager.getStatusMessage() || 'Daily API limit reached. Switch to Simulated mode or wait for quota reset.'}
-                  </div>
-                </div>
-              )}
               <CandlestickChart
                 data={candles}
                 symbol={selectedSymbol}
                 timeframe={selectedTimeframe}
+                dataSource={candles.length > 0 ? 'OANDA' : undefined}
+                error={chartError}
+                onRetry={() => void loadOandaMarketData()}
               />
             </div>
 
@@ -693,80 +713,24 @@ export default function TradingTerminalPage() {
           <div className="w-80 border-l border-gray-800 overflow-y-auto">
             {/* Execution Mode Indicator */}
             <div className="p-4 border-b border-gray-800">
-              <ExecutionModeIndicator mode={executionMode} />
+            <ExecutionModeIndicator mode={executionMode} />
               
-              {/* Data Source Toggle */}
-              <div className="mt-3 bg-gray-800 rounded p-3">
-                <div className="text-xs text-gray-400 mb-2 font-semibold">Market Data Source</div>
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => setUseTwelveData(true)}
-                    className={`flex-1 px-3 py-2 rounded text-xs font-semibold transition-colors ${
-                      useTwelveData
-                        ? 'bg-green-600 text-white'
-                        : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                    }`}
-                  >
-                    🌐 LIVE
-                  </button>
-                  <button
-                    onClick={() => setUseTwelveData(false)}
-                    className={`flex-1 px-3 py-2 rounded text-xs font-semibold transition-colors ${
-                      !useTwelveData
-                        ? 'bg-blue-600 text-white'
-                        : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                    }`}
-                  >
-                    🎮 Simulated
-                  </button>
-                </div>
-                {providerStatus && useTwelveData && (
-                  <div className="mt-3 space-y-1">
-                    <div className="flex justify-between text-xs">
-                      <span className="text-gray-400">Provider:</span>
-                      <span className="text-white font-mono">{providerStatus.primaryProvider}</span>
-                    </div>
-                    <div className="flex justify-between text-xs">
-                      <span className="text-gray-400">Quotes Cached:</span>
-                      <span className="text-white font-mono">{providerStatus.quoteCacheSize}</span>
-                    </div>
-                    <div className="flex justify-between text-xs">
-                      <span className="text-gray-400">Candles Cached:</span>
-                      <span className="text-white font-mono">{providerStatus.candleCacheSize || 0}</span>
-                    </div>
-                    <div className="flex justify-between text-xs">
-                      <span className="text-gray-400">Status:</span>
-                      <span className={`font-semibold ${providerStatus.pollingActive ? 'text-green-400' : 'text-yellow-400'}`}>
-                        {providerStatus.pollingActive ? '🔄 Active' : '⏸️  Paused'}
-                      </span>
-                    </div>
-                  </div>
-                )}
-                {quotesError && useTwelveData && (
-                  <div className="mt-2 p-2 bg-red-900 bg-opacity-30 border border-red-700 rounded">
-                    <div className="text-xs text-red-300">{quotesError}</div>
-                  </div>
-                )}
-                {!useTwelveData && (
-                  <div className="mt-2 text-xs text-gray-500 italic">
-                    Using simulated market data. Switch to LIVE for real quotes.
-                  </div>
-                )}
-              </div>
+              {Object.keys(quotes).length > 0 && <div className="mt-3 text-xs text-green-400">Market data source: OANDA</div>}
+              {oandaSetupMessage && <div className="mt-2 text-xs text-amber-300">{oandaSetupMessage}</div>}
+              {quotesError && <div className="mt-2 text-xs text-red-300">{quotesError}</div>}
             </div>
-            
-            <OrderPanel
+                        <OrderPanel
               symbol={selectedSymbol}
-              bid={selectedQuote.bid}
-              ask={selectedQuote.ask}
-              spread={selectedQuote.spread}
+              bid={selectedQuote?.bid || ''}
+              ask={selectedQuote?.ask || ''}
+              spread={selectedQuote?.spread || ''}
               balance={account.currentBalance}
               equity={account.equity}
               freeMargin={marginInfo?.freeMargin}
               usedMargin={marginInfo?.usedMargin}
               onTrade={handleTrade}
-              disabled={!canTrade}
-              disabledReason={!canTrade ? disabledReason : undefined}
+              disabled={!canTrade || !marketDataAvailable}
+              disabledReason={orderDisabledReason}
             />
             
             {challengeProgress && (

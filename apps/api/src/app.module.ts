@@ -30,6 +30,7 @@ import { SettingsModule } from './settings/settings.module';
 import { DailyLossModule } from './daily-loss/daily-loss.module';
 import { BrokerModule } from './broker/broker.module';
 import { BrokerOrderModule } from './broker-orders/broker-order.module';
+import { PaymentsModule } from './payments/payments.module';
 
 @Module({
   imports: [
@@ -44,6 +45,7 @@ import { BrokerOrderModule } from './broker-orders/broker-order.module';
     AuthModule,
     UsersModule,
     AdminModule,
+    PaymentsModule,
     TradingRulesModule,
     RuleSetsModule,
     ChallengePlansModule,

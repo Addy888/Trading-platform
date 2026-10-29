@@ -149,7 +149,7 @@ export default function TradesHistoryPage() {
               >
                 {accounts.map((account) => (
                   <option key={account.id} value={account.id}>
-                    {account.accountNumber} - {account.challengePlan.name} -{' '}
+                    {account.accountNumber} - {account.challengePlan?.name || 'Direct Funded'} -{' '}
                     {formatCurrency(account.currentBalance)} - {account.status}
                   </option>
                 ))}

@@ -476,7 +476,6 @@ export class AdminService {
       return {
         database: 'connected',
         websocket: 'available',
-        simulatedMarket: process.env.SIMULATED_MARKET_ENABLED === 'true' ? 'running' : 'stopped',
         notifications: 'available',
         timestamp: new Date().toISOString(),
       };
@@ -484,7 +483,6 @@ export class AdminService {
       return {
         database: 'error',
         websocket: 'unknown',
-        simulatedMarket: 'unknown',
         notifications: 'unknown',
         timestamp: new Date().toISOString(),
       };

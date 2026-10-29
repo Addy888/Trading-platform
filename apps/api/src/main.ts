@@ -1,10 +1,15 @@
-import 'dotenv/config';
-import { NestFactory } from '@nestjs/core';
-import { ValidationPipe } from '@nestjs/common';
-import { AppModule } from './app.module';
+import { getBackendEnvFilePath, loadBackendEnvironment } from './config/env-loader';
+
+loadBackendEnvironment();
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const [{ NestFactory }, { ValidationPipe }, { AppModule }, { OandaProvider }] = await Promise.all([
+    import('@nestjs/core'),
+    import('@nestjs/common'),
+    import('./app.module'),
+    import('./market-data/providers/oanda/oanda.provider'),
+  ]);
+  const app = await NestFactory.create(AppModule, { rawBody: true });
   
   // Set global API prefix
   app.setGlobalPrefix('api');
@@ -25,26 +30,27 @@ async function bootstrap() {
     }),
   );
   
-  // Get services for initialization
-  const { MarketPriceService } = await import('./market-data/market-price.service');
-  const { SimulatedMarketEngineService } = await import('./market-data/simulated-market-engine.service');
   const { TradingGateway } = await import('./websocket/trading.gateway');
   const { RealtimeService } = await import('./realtime/realtime.service');
-  
-  const marketPriceService = app.get(MarketPriceService);
-  const simulatedMarketEngine = app.get(SimulatedMarketEngineService);
   const tradingGateway = app.get(TradingGateway);
   const realtimeService = app.get(RealtimeService);
   
-  // Wire up circular dependencies
-  marketPriceService.setSimulatedMarketEngine(simulatedMarketEngine);
   realtimeService.setTradingGateway(tradingGateway);
   
   const port = process.env.PORT || 3001;
   await app.listen(port);
   console.log(`🚀 Backend running on http://localhost:${port}`);
   console.log(`🔌 WebSocket server running on ws://localhost:${port}/trading`);
-  console.log('📈 Simulated market engine enabled');
+  const oandaConfiguration = app.get(OandaProvider).getConfigurationStatus();
+  console.log(
+    `📈 OANDA market data: tokenConfigured=${oandaConfiguration.configured}, ` +
+    `accountPricingConfigured=${oandaConfiguration.accountSpecificPricingAvailable}, ` +
+    `environment=${oandaConfiguration.environment}, endpoint=${oandaConfiguration.apiBaseUrl}, ` +
+    `backendEnvFile=${getBackendEnvFilePath()}`,
+  );
+  if (!oandaConfiguration.configured) {
+    console.warn(`OANDA configuration missing: ${oandaConfiguration.missingVariables.join(', ')}`);
+  }
   console.log(`🔒 CORS enabled for: ${corsOrigins.join(', ')}`);
   console.log(`🛡️  Rate limiting enabled (${process.env.RATE_LIMIT_MAX || 100} req/${process.env.RATE_LIMIT_TTL || 60}s)`);
 }

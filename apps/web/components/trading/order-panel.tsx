@@ -130,7 +130,9 @@ export function OrderPanel({
           <div className="mt-2 pt-2 border-t border-gray-700">
             <div className="flex justify-between text-xs">
               <span className="text-gray-400">Spread:</span>
-              <span className="font-mono text-gray-300">{parseFloat(spread).toFixed(1)}</span>
+              <span className="font-mono text-gray-300">
+                {Number.isFinite(Number(spread)) && spread ? Number(spread).toFixed(1) : '—'}
+              </span>
             </div>
           </div>
         </div>

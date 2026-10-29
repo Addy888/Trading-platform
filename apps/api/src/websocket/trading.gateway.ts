@@ -16,7 +16,6 @@ import {
   SubscribeAccountDto,
   UnsubscribeAccountDto,
   ConnectionReadyEvent,
-  MarketPricesEvent,
   AccountUpdateEvent,
   PositionUpdateEvent,
   TradeOpenedEvent,
@@ -25,6 +24,11 @@ import {
   AccountStatusEvent,
   SystemErrorEvent,
 } from './dto/socket-events.dto';
+
+const socketCorsOrigins = process.env.CORS_ORIGINS
+  ?.split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean) || ['http://localhost:3000'];
 
 /**
  * Trading Gateway
@@ -48,7 +52,6 @@ import {
  * 
  * Server -> Client:
  * - connection:ready
- * - market:price
  * - account:update
  * - position:update
  * - trade:opened
@@ -59,7 +62,7 @@ import {
  */
 @WebSocketGateway({
   cors: {
-    origin: 'http://localhost:3000',
+    origin: socketCorsOrigins,
     credentials: true,
   },
   namespace: '/trading',
@@ -106,7 +109,7 @@ export class TradingGateway
         userId: user.userId,
         role: user.role,
         timestamp: new Date(),
-        message: 'Simulated market connection established',
+        message: 'Authenticated trading connection established',
       };
       
       socket.emit('connection:ready', readyEvent);
@@ -143,6 +146,16 @@ export class TradingGateway
     @MessageBody() data: SubscribeAccountDto,
   ) {
     try {
+      if (!data || typeof data.accountId !== 'string' || !data.accountId.trim()) {
+        const errorEvent: SystemErrorEvent = {
+          message: 'A valid trading account ID is required',
+          code: 'INVALID_SUBSCRIPTION',
+          timestamp: new Date(),
+        };
+        socket.emit('system:error', errorEvent);
+        return { success: false, error: 'A valid trading account ID is required' };
+      }
+
       const userId = this.wsAuth.getUserId(socket);
       if (!userId) {
         throw new Error('User not authenticated');
@@ -169,7 +182,7 @@ export class TradingGateway
 
       // Join account room
       const accountRoom = `account:${data.accountId}`;
-      socket.join(accountRoom);
+      await socket.join(accountRoom);
 
       this.logger.log(`Socket ${socket.id} subscribed to ${accountRoom}`);
 
@@ -207,30 +220,6 @@ export class TradingGateway
       this.logger.error(`Unsubscribe account error: ${(error as Error).message}`);
       return { success: false, error: (error as Error).message };
     }
-  }
-
-  /**
-   * Broadcast market prices to all connected clients
-   */
-  @OnEvent('market.prices.updated')
-  handleMarketPricesUpdate(event: {
-    prices: Array<{ symbol: string; price: string }>;
-    timestamp: Date;
-    source: string;
-  }) {
-    const priceEvent: MarketPricesEvent = {
-      prices: event.prices.map((p) => ({
-        symbol: p.symbol,
-        price: p.price,
-        timestamp: event.timestamp,
-        source: event.source,
-      })),
-      timestamp: event.timestamp,
-      source: event.source,
-    };
-
-    // Broadcast to all connected clients
-    this.server.emit('market:price', priceEvent);
   }
 
   /**

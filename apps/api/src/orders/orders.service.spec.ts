@@ -2,6 +2,8 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { OrdersService } from './orders.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { AccountSnapshotsService } from '../account-snapshots/account-snapshots.service';
+import { AccountStateService } from '../trading-accounts/account-state.service';
+import { RuleSnapshotService } from '../trading-accounts/rule-snapshot.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { OrderStatus, PaymentStatusExtended, ChallengeStatus, TradingAccountStatus } from '@prisma/client';
@@ -87,13 +89,25 @@ describe('OrdersService', () => {
               create: jest.fn(),
               createMany: jest.fn(),
             },
-            $transaction: jest.fn((callback) => callback(prisma)),
+            $transaction: jest.fn((callback: any) => callback(prisma)),
           },
         },
         {
           provide: AccountSnapshotsService,
           useValue: {
             createSnapshot: jest.fn(),
+          },
+        },
+        {
+          provide: AccountStateService,
+          useValue: {
+            initializeAccountState: jest.fn(),
+          },
+        },
+        {
+          provide: RuleSnapshotService,
+          useValue: {
+            createRuleSnapshot: jest.fn(),
           },
         },
         {

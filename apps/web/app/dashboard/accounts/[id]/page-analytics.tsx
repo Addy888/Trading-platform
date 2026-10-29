@@ -607,10 +607,16 @@ export default function TradingAccountAnalyticsPage() {
                         </td>
                         <td className="px-4 py-3 text-sm text-gray-900">{position.volume}</td>
                         <td className="px-4 py-3 text-sm text-gray-900">{parseFloat(position.entryPrice).toFixed(5)}</td>
-                        <td className="px-4 py-3 text-sm text-gray-900">{parseFloat(position.currentPrice).toFixed(5)}</td>
+                        <td className="px-4 py-3 text-sm text-gray-900">
+                          {position.currentPrice === null ? 'Unavailable' : parseFloat(position.currentPrice).toFixed(5)}
+                        </td>
                         <td className="px-4 py-3 text-sm">
-                          <span className={`font-semibold ${parseFloat(position.unrealizedPnl) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                            {formatCurrency(position.unrealizedPnl)}
+                          <span className={`font-semibold ${
+                            position.unrealizedPnl === null
+                              ? 'text-gray-500'
+                              : parseFloat(position.unrealizedPnl) >= 0 ? 'text-green-600' : 'text-red-600'
+                          }`}>
+                            {position.unrealizedPnl === null ? 'Unavailable' : formatCurrency(position.unrealizedPnl)}
                           </span>
                         </td>
                         <td className="px-4 py-3 text-sm">

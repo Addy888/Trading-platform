@@ -5,9 +5,10 @@ import { RuleSnapshotService } from './rule-snapshot.service';
 import { RuleSnapshotBackfillService } from './rule-snapshot-backfill.service';
 import { TradingAccountsController, AdminTradingAccountsController } from './trading-accounts.controller';
 import { ChallengeProgressModule } from '../challenge-progress/challenge-progress.module';
+import { AccountSnapshotsModule } from '../account-snapshots/account-snapshots.module';
 
 @Module({
-  imports: [ChallengeProgressModule],
+  imports: [ChallengeProgressModule, AccountSnapshotsModule],
   controllers: [TradingAccountsController, AdminTradingAccountsController],
   providers: [TradingAccountsService, AccountStateService, RuleSnapshotService, RuleSnapshotBackfillService],
   exports: [TradingAccountsService, AccountStateService, RuleSnapshotService, RuleSnapshotBackfillService],

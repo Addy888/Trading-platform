@@ -418,7 +418,7 @@ export class OrdersService {
       });
 
       // Update order status
-      await tx.order.update({
+      const updatedOrder = await tx.order.update({
         where: { id: orderId },
         data: { status: OrderStatus.FAILED },
       });
@@ -449,7 +449,7 @@ export class OrdersService {
         });
       });
 
-      return order;
+      return updatedOrder;
     });
   }
 

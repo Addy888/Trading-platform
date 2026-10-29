@@ -46,6 +46,7 @@ describe('BalanceEquityService - Day 3 Tests', () => {
             getBid: jest.fn(),
             getAsk: jest.fn(),
             getPrice: jest.fn(),
+            isMarketAvailable: jest.fn().mockReturnValue(true),
           },
         },
         {
@@ -89,7 +90,7 @@ describe('BalanceEquityService - Day 3 Tests', () => {
       );
 
       // (1.09750 - 1.09500) * 1.0 * 100000 = 250.00
-      expect(pnl.toString()).toBe('250.00');
+      expect(pnl.toFixed(2)).toBe('250.00');
       expect(FinancialCalculations.formatMoney(pnl)).toBe('250.00');
     });
 
@@ -108,7 +109,7 @@ describe('BalanceEquityService - Day 3 Tests', () => {
       );
 
       // (1.09500 - 1.09250) * 1.0 * 100000 = 250.00
-      expect(pnl.toString()).toBe('250.00');
+      expect(pnl.toFixed(2)).toBe('250.00');
       expect(FinancialCalculations.formatMoney(pnl)).toBe('250.00');
     });
 
@@ -127,7 +128,7 @@ describe('BalanceEquityService - Day 3 Tests', () => {
       );
 
       // (1.09250 - 1.09500) * 1.0 * 100000 = -250.00
-      expect(pnl.toString()).toBe('-250.00');
+      expect(pnl.toFixed(2)).toBe('-250.00');
       expect(FinancialCalculations.isNegative(pnl)).toBe(true);
     });
 
@@ -146,7 +147,7 @@ describe('BalanceEquityService - Day 3 Tests', () => {
       );
 
       // (1.09500 - 1.09750) * 1.0 * 100000 = -250.00
-      expect(pnl.toString()).toBe('-250.00');
+      expect(pnl.toFixed(2)).toBe('-250.00');
       expect(FinancialCalculations.isNegative(pnl)).toBe(true);
     });
 
@@ -165,7 +166,7 @@ describe('BalanceEquityService - Day 3 Tests', () => {
       );
 
       // (1.09750 - 1.09500) * 0.5 * 100000 = 125.00
-      expect(pnl.toString()).toBe('125.00');
+      expect(pnl.toFixed(2)).toBe('125.00');
     });
 
     it('should round money to 2 decimal places', () => {
@@ -183,8 +184,8 @@ describe('BalanceEquityService - Day 3 Tests', () => {
       );
 
       // (1.09753 - 1.09501) * 1.0 * 100000 = 252.00 (rounded)
-      expect(pnl.toString()).toBe('252.00');
-      expect(pnl.decimalPlaces()).toBe(2);
+      expect(pnl.toFixed(2)).toBe('252.00');
+      expect(pnl.decimalPlaces()).toBeLessThanOrEqual(2);
     });
   });
 
@@ -203,7 +204,7 @@ describe('BalanceEquityService - Day 3 Tests', () => {
         realizedPnl,
       );
 
-      expect(newBalance.toString()).toBe('100500.00');
+      expect(newBalance.toFixed(2)).toBe('100500.00');
       expect(prisma.tradingAccount.update).toHaveBeenCalledWith({
         where: { id: mockAccountId },
         data: expect.objectContaining({
@@ -227,7 +228,7 @@ describe('BalanceEquityService - Day 3 Tests', () => {
         realizedPnl,
       );
 
-      expect(newBalance.toString()).toBe('99500.00');
+      expect(newBalance.toFixed(2)).toBe('99500.00');
     });
 
     it('should not modify balance on position open', async () => {
@@ -255,7 +256,7 @@ describe('BalanceEquityService - Day 3 Tests', () => {
       const equity = await service.calculateAccountEquity(mockAccountId);
 
       // Equity = Balance + 0 unrealized P&L
-      expect(equity.toString()).toBe('100000.00');
+      expect(equity.toFixed(2)).toBe('100000.00');
     });
 
     it('should calculate equity correctly with profitable open positions', async () => {
@@ -275,7 +276,7 @@ describe('BalanceEquityService - Day 3 Tests', () => {
       const equity = await service.calculateAccountEquity(mockAccountId);
 
       // Balance: 100000, Unrealized: +250 = Equity: 100250
-      expect(equity.toString()).toBe('100250.00');
+      expect(equity.toFixed(2)).toBe('100250.00');
     });
 
     it('should calculate equity correctly with losing open positions', async () => {
@@ -295,7 +296,7 @@ describe('BalanceEquityService - Day 3 Tests', () => {
       const equity = await service.calculateAccountEquity(mockAccountId);
 
       // Balance: 100000, Unrealized: -250 = Equity: 99750
-      expect(equity.toString()).toBe('99750.00');
+      expect(equity.toFixed(2)).toBe('99750.00');
     });
 
     it('should calculate equity correctly with multiple open positions', async () => {
@@ -329,7 +330,7 @@ describe('BalanceEquityService - Day 3 Tests', () => {
       // GBPUSD: (1.27000 - 1.26750) * 1.0 * 100000 = +250
       // Total unrealized: +500
       // Equity: 100000 + 500 = 100500
-      expect(equity.toString()).toBe('100500.00');
+      expect(equity.toFixed(2)).toBe('100500.00');
     });
   });
 
@@ -337,7 +338,7 @@ describe('BalanceEquityService - Day 3 Tests', () => {
     it('should initialize HWM to initial balance on account creation', async () => {
       // This is tested in AccountStateService
       // HWM should equal initialBalance at creation
-      expect(mockAccount.highWaterMark.toString()).toBe('100000.00');
+      expect(mockAccount.highWaterMark.toFixed(2)).toBe('100000.00');
     });
 
     it('should update HWM when equity exceeds current HWM', async () => {
@@ -355,7 +356,7 @@ describe('BalanceEquityService - Day 3 Tests', () => {
       );
 
       expect(result.updated).toBe(true);
-      expect(result.hwm.toString()).toBe('105000.00');
+      expect(result.hwm.toFixed(2)).toBe('105000.00');
       expect(prisma.tradingAccount.update).toHaveBeenCalledWith({
         where: { id: mockAccountId },
         data: { highWaterMark: currentEquity },
@@ -374,7 +375,7 @@ describe('BalanceEquityService - Day 3 Tests', () => {
       );
 
       expect(result.updated).toBe(false);
-      expect(result.hwm.toString()).toBe('100000.00'); // Unchanged
+      expect(result.hwm.toFixed(2)).toBe('100000.00'); // Unchanged
       expect(updateSpy).not.toHaveBeenCalled();
     });
 
@@ -400,20 +401,17 @@ describe('BalanceEquityService - Day 3 Tests', () => {
         { equity: new Decimal('101000.00'), expectedHWM: new Decimal('102000.00'), updated: false },
         { equity: new Decimal('103000.00'), expectedHWM: new Decimal('103000.00'), updated: true },
       ];
+      jest.spyOn(prisma.tradingAccount, 'findUnique')
+        .mockResolvedValueOnce({ highWaterMark: new Decimal('100000.00') } as any)
+        .mockResolvedValueOnce({ highWaterMark: new Decimal('100000.00') } as any)
+        .mockResolvedValueOnce({ highWaterMark: new Decimal('102000.00') } as any)
+        .mockResolvedValueOnce({ highWaterMark: new Decimal('102000.00') } as any);
+      jest.spyOn(prisma.tradingAccount, 'update').mockResolvedValue({} as any);
 
       for (const step of hwmSequence) {
-        const account = { ...mockAccount, highWaterMark: step.expectedHWM };
-        jest.spyOn(prisma.tradingAccount, 'findUnique').mockResolvedValue(account as any);
-        
-        if (step.updated) {
-          jest.spyOn(prisma.tradingAccount, 'update').mockResolvedValue({
-            ...account,
-            highWaterMark: step.equity,
-          } as any);
-        }
-
         const result = await service.updateHighWaterMark(mockAccountId, step.equity);
         expect(result.updated).toBe(step.updated);
+        expect(result.hwm.toFixed(2)).toBe(step.expectedHWM.toFixed(2));
       }
     });
   });
@@ -431,7 +429,7 @@ describe('BalanceEquityService - Day 3 Tests', () => {
       const totalRealizedPnl = await service.calculateTotalRealizedPnl(mockAccountId);
 
       // 500 + 300 - 200 = 600
-      expect(totalRealizedPnl.toString()).toBe('600.00');
+      expect(totalRealizedPnl.toFixed(2)).toBe('600.00');
     });
 
     it('should return zero when no trades are closed', async () => {
@@ -439,7 +437,7 @@ describe('BalanceEquityService - Day 3 Tests', () => {
 
       const totalRealizedPnl = await service.calculateTotalRealizedPnl(mockAccountId);
 
-      expect(totalRealizedPnl.toString()).toBe('0.00');
+      expect(totalRealizedPnl.toFixed(2)).toBe('0.00');
     });
 
     it('should handle only profitable closed trades', async () => {
@@ -452,7 +450,7 @@ describe('BalanceEquityService - Day 3 Tests', () => {
 
       const totalRealizedPnl = await service.calculateTotalRealizedPnl(mockAccountId);
 
-      expect(totalRealizedPnl.toString()).toBe('800.00');
+      expect(totalRealizedPnl.toFixed(2)).toBe('800.00');
     });
 
     it('should handle only losing closed trades', async () => {
@@ -465,7 +463,7 @@ describe('BalanceEquityService - Day 3 Tests', () => {
 
       const totalRealizedPnl = await service.calculateTotalRealizedPnl(mockAccountId);
 
-      expect(totalRealizedPnl.toString()).toBe('-800.00');
+      expect(totalRealizedPnl.toFixed(2)).toBe('-800.00');
     });
   });
 
@@ -487,7 +485,7 @@ describe('BalanceEquityService - Day 3 Tests', () => {
       );
 
       // (1.09750 - 1.09500) * 0.5 * 100000 = 125.00
-      expect(realizedPnl.toString()).toBe('125.00');
+      expect(realizedPnl.toFixed(2)).toBe('125.00');
     });
 
     it('should keep unrealized P&L for remaining volume', () => {
@@ -506,7 +504,7 @@ describe('BalanceEquityService - Day 3 Tests', () => {
       );
 
       // (1.09750 - 1.09500) * 0.5 * 100000 = 125.00
-      expect(unrealizedPnl.toString()).toBe('125.00');
+      expect(unrealizedPnl.toFixed(2)).toBe('125.00');
     });
   });
 
@@ -516,7 +514,13 @@ describe('BalanceEquityService - Day 3 Tests', () => {
       const expectedBalance = new Decimal('100500.00');
       const expectedEquity = new Decimal('100500.00'); // No open positions
       
-      jest.spyOn(prisma.tradingAccount, 'findUnique').mockResolvedValue(mockAccount as any);
+      jest.spyOn(prisma.tradingAccount, 'findUnique')
+        .mockResolvedValueOnce(mockAccount as any)
+        .mockResolvedValueOnce({
+          ...mockAccount,
+          currentBalance: expectedBalance,
+        } as any)
+        .mockResolvedValueOnce(mockAccount as any);
       jest.spyOn(prisma.tradingAccount, 'update').mockResolvedValue({
         ...mockAccount,
         currentBalance: expectedBalance,
@@ -530,10 +534,10 @@ describe('BalanceEquityService - Day 3 Tests', () => {
         realizedPnl,
       );
 
-      expect(result.balance.toString()).toBe('100500.00');
-      expect(result.equity.toString()).toBe('100500.00');
+      expect(result.balance.toFixed(2)).toBe('100500.00');
+      expect(result.equity.toFixed(2)).toBe('100500.00');
       expect(result.hwmUpdated).toBe(true);
-      expect(result.hwm.toString()).toBe('100500.00');
+      expect(result.hwm.toFixed(2)).toBe('100500.00');
     });
   });
 

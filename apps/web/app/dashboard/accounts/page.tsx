@@ -72,14 +72,24 @@ export default function TradingAccountsPage() {
           ) : accounts.length === 0 ? (
             <div className="bg-white rounded-lg shadow p-12 text-center">
               <div className="text-6xl mb-4">💼</div>
-              <p className="text-gray-600 text-lg mb-4">No trading accounts yet</p>
-              <p className="text-gray-500 mb-6">Purchase a challenge to get started</p>
-              <button
-                onClick={() => router.push('/dashboard/challenges')}
-                className="bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700"
-              >
-                Browse Challenges
-              </button>
+              <p className="text-gray-900 font-bold text-lg mb-2">No trading accounts yet</p>
+              <p className="text-gray-500 text-sm max-w-md mx-auto mb-6">
+                Create a direct simulated trading account funded from your wallet balance, or take an evaluation challenge.
+              </p>
+              <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
+                <button
+                  onClick={() => router.push('/dashboard/trading')}
+                  className="bg-blue-600 text-white px-6 py-2.5 rounded-lg hover:bg-blue-700 text-sm font-semibold shadow-md"
+                >
+                  Create Trading Account
+                </button>
+                <button
+                  onClick={() => router.push('/dashboard/wallet')}
+                  className="bg-gray-100 text-gray-800 px-6 py-2.5 rounded-lg hover:bg-gray-200 text-sm font-semibold border border-gray-300"
+                >
+                  Deposit Funds to Wallet
+                </button>
+              </div>
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">

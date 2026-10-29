@@ -5,14 +5,14 @@ import { io, Socket } from 'socket.io-client';
  * 
  * Singleton socket connection for real-time trading updates.
  * 
- * IMPORTANT: All market data is SIMULATED/DEMO
  */
 
 let socket: Socket | null = null;
+let socketAccessToken: string | null = null;
+let socketAuthenticated = false;
 
 export interface SocketEvents {
   'connection:ready': (data: any) => void;
-  'market:price': (data: any) => void;
   'account:update': (data: any) => void;
   'position:update': (data: any) => void;
   'trade:opened': (data: any) => void;
@@ -29,6 +29,17 @@ export function getSocket(token?: string): Socket | null {
   if (typeof window === 'undefined') {
     return null; // Server-side rendering
   }
+  if (!token) {
+    disconnectSocket();
+    return null;
+  }
+
+  if (socket && token && socketAccessToken !== token) {
+    socket.disconnect();
+    socket = null;
+    socketAccessToken = null;
+    socketAuthenticated = false;
+  }
 
   if (!socket && token) {
     const SOCKET_URL = process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:3001';
@@ -43,14 +54,21 @@ export function getSocket(token?: string): Socket | null {
       reconnectionDelayMax: 5000,
       reconnectionAttempts: 5,
     });
+    socketAccessToken = token;
 
     // Connection event logging
     socket.on('connect', () => {
+      socketAuthenticated = false;
       console.log('✅ WebSocket connected:', socket?.id);
     });
 
     socket.on('disconnect', (reason) => {
+      socketAuthenticated = false;
       console.log('❌ WebSocket disconnected:', reason);
+    });
+
+    socket.on('connection:ready', () => {
+      socketAuthenticated = true;
     });
 
     socket.on('connect_error', (error) => {
@@ -69,6 +87,8 @@ export function disconnectSocket() {
     socket.disconnect();
     socket = null;
   }
+  socketAccessToken = null;
+  socketAuthenticated = false;
 }
 
 /**
@@ -76,6 +96,10 @@ export function disconnectSocket() {
  */
 export function isSocketConnected(): boolean {
   return socket?.connected ?? false;
+}
+
+export function isSocketAuthenticated(): boolean {
+  return socketAuthenticated;
 }
 
 /**

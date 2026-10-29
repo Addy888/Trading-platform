@@ -3,13 +3,15 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/a
 export interface TradingAccount {
   id: string;
   userId: string;
-  challengePlanId: string;
-  orderId: string;
+  challengePlanId?: string | null;
+  orderId?: string | null;
   ruleSetId: string;
   accountNumber: string;
   initialBalance: string;
   currentBalance: string;
   equity: string;
+  executionMode?: string;
+  stage?: string;
   status: 'PENDING' | 'ACTIVE' | 'PASSED' | 'BREACHED' | 'SUSPENDED' | 'CLOSED';
   startedAt?: string;
   createdAt: string;
@@ -82,6 +84,18 @@ export const tradingAccountsApi = {
       headers: {
         'Authorization': `Bearer ${token}`,
       },
+    });
+    return handleResponse(response);
+  },
+
+  async createAccount(token: string, data?: { initialFundingAmount?: string | number }): Promise<TradingAccount> {
+    const response = await fetch(`${API_BASE_URL}/trading-accounts`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`,
+      },
+      body: JSON.stringify(data || {}),
     });
     return handleResponse(response);
   },

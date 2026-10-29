@@ -1,4 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { ForbiddenException, ServiceUnavailableException } from '@nestjs/common';
 import { MarginService, MarginCalculationResult, AccountMargin } from './margin.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { InstrumentConfigService } from '../market-data/instrument-config.service';
@@ -27,6 +28,18 @@ describe('MarginService - Day 10 Enhanced Tests', () => {
 
   const mockMarketData = {
     getMidPrice: jest.fn(),
+    getBid: jest.fn(() => mockMarketData.getMidPrice()),
+    getAsk: jest.fn(() => mockMarketData.getMidPrice()),
+    isMarketAvailable: jest.fn().mockReturnValue(true),
+    getProviderStatus: jest.fn().mockReturnValue({
+      configuration: { accountIdConfigured: false, environment: 'practice' },
+      providers: {
+        OANDA: {
+          quoteErrorCategory: 'ACCOUNT_ID_REQUIRED',
+          candleErrorCategory: null,
+        },
+      },
+    }),
   };
 
   beforeEach(async () => {
@@ -280,6 +293,10 @@ describe('MarginService - Day 10 Enhanced Tests', () => {
       mockMarketData.getMidPrice
         .mockReturnValueOnce(new Decimal(1.1050)) // EURUSD current price
         .mockReturnValueOnce(new Decimal(1.2480)); // GBPUSD current price
+      mockMarketData.getBid
+        .mockReturnValueOnce(new Decimal(1.1050));
+      mockMarketData.getAsk
+        .mockReturnValueOnce(new Decimal(1.2480));
 
       const result: AccountMargin = await service.calculateAccountMargin(accountId);
 
@@ -290,6 +307,19 @@ describe('MarginService - Day 10 Enhanced Tests', () => {
       expect(result.openPositions).toBe(2);
       expect(result.accountId).toBe(accountId);
       expect(result.accountNumber).toBe('TEST-001');
+    });
+
+    it('rejects margin access when the authenticated user does not own the account', async () => {
+      mockPrisma.tradingAccount.findUnique.mockResolvedValue({
+        id: 'account-private',
+        userId: 'owner-1',
+        accountNumber: 'TEST-PRIVATE',
+        currentBalance: new Decimal(10000),
+        trades: [],
+      });
+
+      await expect(service.calculateAccountMargin('account-private', 'other-user'))
+        .rejects.toBeInstanceOf(ForbiddenException);
     });
 
     it('should handle zero used margin correctly', async () => {
@@ -449,7 +479,7 @@ describe('MarginService - Day 10 Enhanced Tests', () => {
       expect(result.openPositions).toBe(1); // Trade exists but not counted
     });
 
-    it('should use entry price when market data unavailable', async () => {
+    it('should report unavailable valuation when market data is unavailable', async () => {
       const accountId = 'account-7';
 
       mockPrisma.tradingAccount.findUnique.mockResolvedValue({
@@ -476,12 +506,72 @@ describe('MarginService - Day 10 Enhanced Tests', () => {
 
       mockMarketData.getMidPrice.mockReturnValue(null); // No market data
 
-      const result = await service.calculateAccountMargin(accountId);
+      const exception = await service.calculateAccountMargin(accountId).catch((error) => error);
+      expect(exception).toBeInstanceOf(ServiceUnavailableException);
+      expect((exception as ServiceUnavailableException).getResponse()).toMatchObject({
+        statusCode: 503,
+        code: 'OANDA_QUOTE_UNAVAILABLE',
+        provider: 'OANDA',
+        category: 'ACCOUNT_ID_REQUIRED',
+        retryable: false,
+        message: expect.stringContaining('OANDA_ACCOUNT_ID'),
+      });
 
-      // Should use entry price for margin calculation
-      // 0.1 * 1.1000 * 100000 / 100 = 110.00
-      expect(result.usedMargin.toFixed(2)).toBe('110.00');
-      expect(result.unrealizedPnl.toFixed(2)).toBe('0.00'); // No P&L calculation without price
+      mockMarketData.getProviderStatus.mockReturnValueOnce({
+        configuration: { accountIdConfigured: false, environment: 'practice' },
+        providers: {
+          OANDA: {
+            quoteErrorCategory: 'INVALID_CREDENTIALS',
+            candleErrorCategory: 'INVALID_CREDENTIALS',
+          },
+        },
+      });
+      const authException = await service.calculateAccountMargin(accountId).catch((error) => error);
+      expect((authException as ServiceUnavailableException).getResponse()).toMatchObject({
+        statusCode: 503,
+        category: 'INVALID_CREDENTIALS',
+        retryable: false,
+        message: expect.stringContaining('OANDA rejected the token'),
+      });
+    });
+
+    it('preserves transient quote failures in the valuation error', async () => {
+      mockPrisma.tradingAccount.findUnique.mockResolvedValue({
+        id: 'account-network',
+        accountNumber: 'TEST-NETWORK',
+        currentBalance: new Decimal(10000),
+        trades: [{
+          id: 'trade-network',
+          symbol: 'EURUSD',
+          side: TradeSide.BUY,
+          volume: new Decimal(0.1),
+          entryPrice: new Decimal(1.1),
+          status: TradeStatus.OPEN,
+        }],
+      });
+      mockInstrumentConfig.getInstrument.mockReturnValue({
+        symbol: 'EURUSD',
+        contractMultiplier: 100000,
+        defaultLeverage: 100,
+      });
+      mockMarketData.getMidPrice.mockReturnValue(null);
+      mockMarketData.getProviderStatus.mockReturnValueOnce({
+        configuration: { accountIdConfigured: true, environment: 'practice' },
+        providers: {
+          OANDA: {
+            quoteErrorCategory: 'NETWORK',
+            candleErrorCategory: null,
+          },
+        },
+      });
+
+      const exception = await service.calculateAccountMargin('account-network').catch((error) => error);
+      expect(exception).toBeInstanceOf(ServiceUnavailableException);
+      expect((exception as ServiceUnavailableException).getResponse()).toMatchObject({
+        category: 'NETWORK',
+        retryable: true,
+        message: expect.stringContaining('could not reach the selected OANDA environment'),
+      });
     });
   });
 
@@ -743,6 +833,8 @@ describe('MarginService - Day 10 Enhanced Tests', () => {
       mockMarketData.getMidPrice
         .mockReturnValueOnce(new Decimal(1.1050))
         .mockReturnValueOnce(new Decimal(1.2450));
+      mockMarketData.getBid.mockReturnValueOnce(new Decimal(1.1050));
+      mockMarketData.getAsk.mockReturnValueOnce(new Decimal(1.2450));
 
       const details = await service.getPositionMarginDetails(accountId);
 

@@ -199,13 +199,13 @@ export default function AdminTradingAccountDetailPage() {
                   <div>
                     <label className="text-sm text-gray-600">Name</label>
                     <div className="font-semibold text-gray-900">
-                      {accountDetail.account.challengePlan.name}
+                      {accountDetail.account.challengePlan?.name || 'Direct Funded (No Challenge)'}
                     </div>
                   </div>
                   <div>
                     <label className="text-sm text-gray-600">Description</label>
                     <div className="text-gray-900">
-                      {accountDetail.account.challengePlan.description || 'N/A'}
+                      {accountDetail.account.challengePlan?.description || 'Direct wallet-funded trading account'}
                     </div>
                   </div>
                 </div>

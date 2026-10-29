@@ -31,6 +31,7 @@ export class AccountStateService {
     accountId: string,
     initialBalance: Decimal,
     tx?: Prisma.TransactionClient,
+    stage: AccountStage = AccountStage.CHALLENGE,
   ): Promise<void> {
     const db = tx || this.prisma;
 
@@ -46,7 +47,7 @@ export class AccountStateService {
         currentDrawdown: new Decimal(0),
         lastDailyResetAt: now,
         status: TradingAccountStatus.ACTIVE,
-        stage: AccountStage.CHALLENGE,
+        stage,
         startedAt: now,
       },
     });

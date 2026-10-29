@@ -98,16 +98,6 @@ export default function AdminDashboardPage() {
                       </div>
                     </div>
                     <div className="border border-gray-200 rounded-lg p-4">
-                      <div className="text-sm text-gray-600 mb-1">Simulated Market</div>
-                      <div
-                        className={`text-lg font-bold ${
-                          health.simulatedMarket === 'running' ? 'text-green-600' : 'text-gray-600'
-                        }`}
-                      >
-                        {health.simulatedMarket === 'running' ? '✓ Running' : '○ Stopped'}
-                      </div>
-                    </div>
-                    <div className="border border-gray-200 rounded-lg p-4">
                       <div className="text-sm text-gray-600 mb-1">Notifications</div>
                       <div
                         className={`text-lg font-bold ${

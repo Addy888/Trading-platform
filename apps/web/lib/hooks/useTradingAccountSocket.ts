@@ -28,26 +28,19 @@ export interface PositionRealtimeData {
   updatedAt: Date;
 }
 
-export interface MarketPriceData {
-  symbol: string;
-  price: string;
-  timestamp: Date;
-}
-
 /**
  * Hook for trading account real-time updates
  */
 export function useTradingAccountSocket(accountId: string | null, token?: string) {
-  const { socket, isConnected, connectionState } = useSocket(token);
+  const { socket, isConnected, isAuthenticated, connectionState } = useSocket(token);
   const [accountData, setAccountData] = useState<AccountRealtimeData | null>(null);
   const [positions, setPositions] = useState<Record<string, PositionRealtimeData>>({});
-  const [marketPrices, setMarketPrices] = useState<Record<string, MarketPriceData>>({});
   const [challengeProgress, setChallengeProgress] = useState<any>(null);
   const [recentTrades, setRecentTrades] = useState<any[]>([]);
 
   // Subscribe to account updates
   useEffect(() => {
-    if (!socket || !isConnected || !accountId) return;
+    if (!socket || !isConnected || !isAuthenticated || !accountId) return;
 
     // Subscribe when connected
     subscribeToAccount(accountId);
@@ -56,7 +49,7 @@ export function useTradingAccountSocket(accountId: string | null, token?: string
       // Unsubscribe when component unmounts or accountId changes
       unsubscribeFromAccount(accountId);
     };
-  }, [socket, isConnected, accountId]);
+  }, [socket, isConnected, isAuthenticated, accountId]);
 
   // Handle account updates
   useEffect(() => {
@@ -75,18 +68,6 @@ export function useTradingAccountSocket(accountId: string | null, token?: string
           [data.tradeId]: data,
         }));
       }
-    };
-
-    const handleMarketPrice = (data: {
-      prices: MarketPriceData[];
-      timestamp: Date;
-      source: string;
-    }) => {
-      const priceMap: Record<string, MarketPriceData> = {};
-      data.prices.forEach((p) => {
-        priceMap[p.symbol] = p;
-      });
-      setMarketPrices(priceMap);
     };
 
     const handleTradeOpened = (data: any) => {
@@ -134,7 +115,6 @@ export function useTradingAccountSocket(accountId: string | null, token?: string
 
     socket.on('account:update', handleAccountUpdate);
     socket.on('position:update', handlePositionUpdate);
-    socket.on('market:price', handleMarketPrice);
     socket.on('trade:opened', handleTradeOpened);
     socket.on('trade:closed', handleTradeClosed);
     socket.on('challenge:update', handleChallengeUpdate);
@@ -143,7 +123,6 @@ export function useTradingAccountSocket(accountId: string | null, token?: string
     return () => {
       socket.off('account:update', handleAccountUpdate);
       socket.off('position:update', handlePositionUpdate);
-      socket.off('market:price', handleMarketPrice);
       socket.off('trade:opened', handleTradeOpened);
       socket.off('trade:closed', handleTradeClosed);
       socket.off('challenge:update', handleChallengeUpdate);
@@ -162,7 +141,6 @@ export function useTradingAccountSocket(accountId: string | null, token?: string
     connectionState,
     accountData,
     positions: Object.values(positions),
-    marketPrices,
     challengeProgress,
     recentTrades,
     refreshData,

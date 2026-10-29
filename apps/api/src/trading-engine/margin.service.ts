@@ -1,8 +1,8 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { ForbiddenException, Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { InstrumentConfigService } from '../market-data/instrument-config.service';
 import { MarketDataEngineService } from '../market-data/market-data-engine.service';
-import { TradeStatus } from '@prisma/client';
+import { TradeSide, TradeStatus } from '@prisma/client';
 import Decimal from 'decimal.js';
 import { FinancialCalculations } from '../common/utils/financial-calculations.util';
 
@@ -198,7 +198,7 @@ export class MarginService {
    * @param accountId Trading account ID
    * @returns Complete margin information
    */
-  async calculateAccountMargin(accountId: string): Promise<AccountMargin> {
+  async calculateAccountMargin(accountId: string, userId?: string): Promise<AccountMargin> {
     // Get account with open trades
     const account = await this.prisma.tradingAccount.findUnique({
       where: { id: accountId },
@@ -211,6 +211,9 @@ export class MarginService {
 
     if (!account) {
       throw new Error('Trading account not found');
+    }
+    if (userId && account.userId !== userId) {
+      throw new ForbiddenException('You do not have access to this trading account.');
     }
 
     // Calculate used margin and unrealized P&L from open positions
@@ -225,27 +228,23 @@ export class MarginService {
         continue;
       }
 
-      // Get current price for mark-to-market
-      const currentPrice = this.marketData.getMidPrice(trade.symbol);
-      if (!currentPrice) {
-        this.logger.warn(`No price available for: ${trade.symbol}, using entry price`);
-        // Fallback to entry price if market data unavailable
-        const marginCalc = this.calculateRequiredMargin(
-          trade.symbol,
-          trade.volume,
-          trade.entryPrice,
-          instrument.defaultLeverage,
-        );
-        usedMargin = usedMargin.plus(marginCalc.requiredMargin);
-        totalExposure = totalExposure.plus(marginCalc.notionalValue);
-        continue;
+      if (!this.marketData.isMarketAvailable(trade.symbol)) {
+        throw this.quoteUnavailable(trade.symbol);
       }
 
-      // Calculate margin for this position at current price
+      const closePrice = trade.side === TradeSide.BUY
+        ? this.marketData.getBid(trade.symbol)
+        : this.marketData.getAsk(trade.symbol);
+      const midPrice = this.marketData.getMidPrice(trade.symbol);
+      if (!closePrice || !midPrice) {
+        throw this.quoteUnavailable(trade.symbol);
+      }
+
+      // Use mid for exposure, but value P&L at the executable close-side price.
       const marginCalc = this.calculateRequiredMargin(
         trade.symbol,
         trade.volume,
-        currentPrice,
+        midPrice,
         instrument.defaultLeverage,
       );
 
@@ -253,7 +252,7 @@ export class MarginService {
       totalExposure = totalExposure.plus(marginCalc.notionalValue);
 
       // Calculate unrealized P&L
-      const pnl = this.calculateUnrealizedPnl(trade, currentPrice, instrument);
+      const pnl = this.calculateUnrealizedPnl(trade, closePrice, instrument);
       unrealizedPnl = unrealizedPnl.plus(pnl);
     }
 
@@ -325,16 +324,25 @@ export class MarginService {
         continue;
       }
 
-      const currentPrice = this.marketData.getMidPrice(trade.symbol) || trade.entryPrice;
+      if (!this.marketData.isMarketAvailable(trade.symbol)) {
+        throw this.quoteUnavailable(trade.symbol);
+      }
+      const closePrice = trade.side === TradeSide.BUY
+        ? this.marketData.getBid(trade.symbol)
+        : this.marketData.getAsk(trade.symbol);
+      const midPrice = this.marketData.getMidPrice(trade.symbol);
+      if (!closePrice || !midPrice) {
+        throw this.quoteUnavailable(trade.symbol);
+      }
       
       const marginCalc = this.calculateRequiredMargin(
         trade.symbol,
         trade.volume,
-        currentPrice,
+        midPrice,
         instrument.defaultLeverage,
       );
 
-      const unrealizedPnl = this.calculateUnrealizedPnl(trade, currentPrice, instrument);
+      const unrealizedPnl = this.calculateUnrealizedPnl(trade, closePrice, instrument);
 
       details.push({
         tradeId: trade.id,
@@ -342,7 +350,7 @@ export class MarginService {
         side: trade.side,
         volume: trade.volume,
         entryPrice: trade.entryPrice,
-        currentPrice,
+        currentPrice: closePrice,
         leverage: instrument.defaultLeverage,
         notionalValue: marginCalc.notionalValue,
         requiredMargin: marginCalc.requiredMargin,
@@ -370,6 +378,56 @@ export class MarginService {
       trade.volume,
       instrument.contractMultiplier,
     );
+  }
+
+  private quoteUnavailable(symbol: string): ServiceUnavailableException {
+    const status = this.marketData.getProviderStatus();
+    const provider = status.providers.OANDA;
+    const blockers: string[] = [];
+    const quoteCategory = provider.quoteErrorCategory;
+    const candleCategory = provider.candleErrorCategory;
+    let category = candleCategory === 'INVALID_CREDENTIALS'
+      ? candleCategory
+      : quoteCategory || 'QUOTE_UNAVAILABLE';
+    if (!status.configuration.accountIdConfigured && category === 'QUOTE_UNAVAILABLE') {
+      category = 'ACCOUNT_ID_REQUIRED';
+    }
+
+    if (category === 'INVALID_CREDENTIALS') {
+      blockers.push(`OANDA rejected the token for the ${status.configuration.environment} environment`);
+    } else if (category === 'ACCOUNT_ACCESS') {
+      blockers.push('OANDA denied access to the configured OANDA account');
+    } else if (category === 'ACCOUNT_ID_REQUIRED') {
+      blockers.push('OANDA_ACCOUNT_ID is not configured for account-specific pricing');
+    } else if (category === 'RATE_LIMITED') {
+      blockers.push('OANDA rate limited account-specific pricing');
+    } else if (category === 'NETWORK') {
+      blockers.push('the backend could not reach the selected OANDA environment');
+    } else if (category === 'INSTRUMENT_UNAVAILABLE') {
+      blockers.push(`OANDA does not provide ${symbol} for the configured account`);
+    } else if (category === 'PROVIDER') {
+      blockers.push('OANDA returned an unusable account-pricing response');
+    } else if (category === 'NOT_CONFIGURED' || category === 'DISABLED') {
+      blockers.push('OANDA_API_TOKEN is not configured in the backend environment');
+    }
+    if (!status.configuration.accountIdConfigured) {
+      if (category !== 'ACCOUNT_ID_REQUIRED') {
+        blockers.push('OANDA_ACCOUNT_ID is not configured for account-specific pricing');
+      }
+    }
+    if (!blockers.length) {
+      blockers.push('a fresh OANDA bid/ask quote is not available');
+    }
+    const retryable = ['QUOTE_UNAVAILABLE', 'NETWORK', 'RATE_LIMITED', 'PROVIDER'].includes(category);
+    return new ServiceUnavailableException({
+      statusCode: 503,
+      error: 'Service Unavailable',
+      code: 'OANDA_QUOTE_UNAVAILABLE',
+      provider: 'OANDA',
+      category,
+      retryable,
+      message: `A fresh OANDA quote is unavailable for ${symbol}; margin and P&L cannot be valued because ${blockers.join(' and ')}. Configure the correct OANDA credentials and account for this environment; the application trading-account ID is not an OANDA account ID.`,
+    });
   }
 
   /**

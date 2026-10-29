@@ -9,7 +9,6 @@ import { adminApi } from '@/lib/admin-api';
 interface HealthStatus {
   database: string;
   websocket: string;
-  simulatedMarket: string;
   notifications: string;
   timestamp: string;
 }
@@ -194,22 +193,6 @@ export default function SystemHealthPage() {
                     </div>
                   </div>
 
-                  {/* Market Data Engine */}
-                  <div className={`border-2 rounded-lg p-6 ${getStatusColor(health.simulatedMarket)}`}>
-                    <div className="flex items-center justify-between mb-3">
-                      <h3 className="text-lg font-semibold">Market Data</h3>
-                      <span className="text-3xl">{getStatusIcon(health.simulatedMarket)}</span>
-                    </div>
-                    <p className="text-2xl font-bold mb-2">{formatStatus(health.simulatedMarket)}</p>
-                    <p className="text-sm opacity-75">Simulated Engine</p>
-                    <div className="mt-4 pt-4 border-t border-current border-opacity-20">
-                      <div className="text-sm space-y-1">
-                        <p>Mode: Simulated</p>
-                        <p>Symbols: 10</p>
-                      </div>
-                    </div>
-                  </div>
-
                   {/* Notifications */}
                   <div className={`border-2 rounded-lg p-6 ${getStatusColor(health.notifications)}`}>
                     <div className="flex items-center justify-between mb-3">
@@ -337,8 +320,8 @@ export default function SystemHealthPage() {
                       <span className="text-yellow-600 font-medium">⚠ Mock</span>
                     </div>
                     <div className="flex justify-between items-center py-2 border-b border-gray-200">
-                      <span className="text-gray-600">Market Data Provider</span>
-                      <span className="text-yellow-600 font-medium">⚠ Simulated</span>
+                      <span className="text-gray-600">Market Data</span>
+                      <span className="text-gray-600 font-medium">OANDA v20 API</span>
                     </div>
                   </div>
                 </div>
@@ -351,7 +334,7 @@ export default function SystemHealthPage() {
                   <p>• <strong>Email Service:</strong> Currently in development mode (console logs only). Configure SendGrid/Mailgun/SES for production.</p>
                   <p>• <strong>File Storage:</strong> KYC documents use mock URLs. Integrate with S3/Cloudinary for production.</p>
                   <p>• <strong>Payment Gateway:</strong> Manual approval only. Integrate Stripe/PayPal for automated processing.</p>
-                  <p>• <strong>Market Data:</strong> Using simulated price engine. Connect to real data provider (Polygon.io, Alpha Vantage, Binance) for live trading.</p>
+                  <p>• <strong>Market Data:</strong> Quotes and candles use OANDA v20. Configure valid backend-only OANDA credentials for the selected practice or live environment.</p>
                 </div>
               </div>
             </>

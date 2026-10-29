@@ -1,7 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
-import { UnifiedMarketDataService } from '../../market-data/unified-market-data.service';
-import { MarketDataSource } from '../../market-data/dto/normalized-tick.dto';
+import { MarketDataEngineService } from '../../market-data/market-data-engine.service';
 import { OrderType } from '../dto/place-order.dto';
 import { BrokerOrderStatus } from '../dto/order-response.dto';
 import Decimal from 'decimal.js';
@@ -12,7 +11,7 @@ import Decimal from 'decimal.js';
  * Day 6: Local paper trading execution
  * 
  * Provides realistic order simulation with:
- * - Real market data from Twelve Data for fills
+ * - Genuine OANDA market data for fills
  * - Simulated broker latency (50-200ms)
  * - Realistic order lifecycle states
  * - No external broker API calls
@@ -38,7 +37,7 @@ export class PaperOrderAdapter {
 
   constructor(
     private prisma: PrismaService,
-    private marketData: UnifiedMarketDataService,
+    private marketData: MarketDataEngineService,
   ) {}
 
   /**
@@ -222,23 +221,13 @@ export class PaperOrderAdapter {
   }
 
   /**
-   * Get current market price from Twelve Data
+   * Get current market price from OANDA
    */
   private async getMarketPrice(symbol: string): Promise<Decimal | null> {
-    try {
-      // Try to get real market data
-      const quoteResponse = this.marketData.getQuote(symbol, MarketDataSource.TWELVEDATA);
-      
-      if (quoteResponse.available && quoteResponse.tick?.lastTradedPrice) {
-        return quoteResponse.tick.lastTradedPrice;
-      }
-
-      this.logger.warn(`[PAPER] No quote available for ${symbol}: ${quoteResponse.reason || 'Unknown'}`);
-      return null;
-    } catch (error) {
-      this.logger.error(`[PAPER] Failed to get market price for ${symbol}: ${(error as Error).message}`);
-      return null;
-    }
+    const price = this.marketData.getMidPrice(symbol);
+    if (price && this.marketData.isMarketAvailable(symbol)) return price;
+    this.logger.warn(`[PAPER] No fresh OANDA quote available for ${symbol}; order cannot be filled.`);
+    return null;
   }
 
   /**

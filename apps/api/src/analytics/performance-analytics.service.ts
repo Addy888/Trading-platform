@@ -89,7 +89,7 @@ export class PerformanceAnalyticsService {
     // Calculate unrealized PnL
     let totalUnrealizedPnl = new Decimal(0);
     for (const trade of openTrades) {
-      const currentPrice = this.marketPrice.getPrice(trade.symbol);
+      const currentPrice = this.marketPrice.getExitPrice(trade.symbol, trade.side);
       const unrealizedPnl = this.calculateUnrealizedPnl(
         trade.side,
         trade.entryPrice,

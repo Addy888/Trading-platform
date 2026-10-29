@@ -8,8 +8,8 @@ interface Position {
   side: 'BUY' | 'SELL';
   volume: string;
   entryPrice: string;
-  currentPrice: string;
-  unrealizedPnl: string;
+  currentPrice: string | null;
+  unrealizedPnl: string | null;
   stopLoss?: string;
   takeProfit?: string;
   openedAt: string;
@@ -62,7 +62,9 @@ export function PositionsTable({ positions, onClose, onModify }: PositionsTableP
         </thead>
         <tbody>
           {positions.map((position) => {
-            const pnl = parseFloat(position.unrealizedPnl);
+            const pnl = position.unrealizedPnl === null
+              ? null
+              : parseFloat(position.unrealizedPnl);
             const isModifying = modifyingId === position.id;
 
             return (
@@ -84,12 +86,14 @@ export function PositionsTable({ positions, onClose, onModify }: PositionsTableP
                   {parseFloat(position.entryPrice).toFixed(5)}
                 </td>
                 <td className="px-4 py-2 text-right font-mono">
-                  {parseFloat(position.currentPrice).toFixed(5)}
+                  {position.currentPrice === null
+                    ? 'Unavailable'
+                    : parseFloat(position.currentPrice).toFixed(5)}
                 </td>
                 <td className={`px-4 py-2 text-right font-mono font-semibold ${
-                  pnl >= 0 ? 'text-green-400' : 'text-red-400'
+                  pnl === null ? 'text-gray-400' : pnl >= 0 ? 'text-green-400' : 'text-red-400'
                 }`}>
-                  {pnl >= 0 ? '+' : ''}{pnl.toFixed(2)}
+                  {pnl === null ? 'Unavailable' : `${pnl >= 0 ? '+' : ''}${pnl.toFixed(2)}`}
                 </td>
                 <td className="px-4 py-2 text-right font-mono text-xs">
                   {position.stopLoss ? parseFloat(position.stopLoss).toFixed(5) : '-'}

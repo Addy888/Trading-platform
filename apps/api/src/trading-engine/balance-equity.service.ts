@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { MarketDataEngineService } from '../market-data/market-data-engine.service';
 import { InstrumentConfigService } from '../market-data/instrument-config.service';
@@ -95,7 +95,13 @@ export class BalanceEquityService {
     let totalUnrealizedPnl = new Decimal(0);
 
     for (const trade of openTrades) {
-      // Get current market price (bid for long close, ask for short close)
+      if (!this.marketData.isMarketAvailable(trade.symbol)) {
+        throw new ServiceUnavailableException(
+          `A fresh OANDA quote is unavailable for ${trade.symbol}; unrealized P&L cannot be valued.`,
+        );
+      }
+
+      // Mark open BUY positions at bid and SELL positions at ask, their executable close prices.
       let currentPrice: Decimal | null;
       
       if (trade.side === TradeSide.BUY) {
@@ -105,11 +111,9 @@ export class BalanceEquityService {
       }
 
       if (!currentPrice) {
-        // If market price unavailable, skip this position
-        this.logger.warn(
-          `Market price unavailable for ${trade.symbol}, skipping unrealized P&L`,
+        throw new ServiceUnavailableException(
+          `A fresh OANDA close-side quote is unavailable for ${trade.symbol}; unrealized P&L cannot be valued.`,
         );
-        continue;
       }
 
       // Get contract multiplier

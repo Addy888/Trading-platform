@@ -1,685 +1,301 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-import { TwelveDataProvider } from './providers/twelvedata/twelve-data.provider';
-import { AlphaVantageProvider } from './providers/alphavantage/alpha-vantage.provider';
-import Decimal from 'decimal.js';
-
-/**
- * Market Data Manager Service
- * 
- * Centralized manager for all market data providers with:
- * - Quota tracking and exhaustion handling
- * - Provider priority and fallback
- * - Shared caching layer
- * - Request deduplication
- * - Configurable TTLs
- * 
- * This prevents quota exhaustion by:
- * 1. Single scheduler for all polling (not per-component)
- * 2. Shared cache across all consumers
- * 3. In-flight request deduplication
- * 4. Provider cooldown after quota exhaustion
- * 5. Clear separation of LIVE vs SIMULATED modes
- */
+import {
+  BadGatewayException,
+  BadRequestException,
+  ForbiddenException,
+  HttpException,
+  Injectable,
+  Logger,
+  NotFoundException,
+  OnModuleInit,
+  ServiceUnavailableException,
+  UnauthorizedException,
+  HttpStatus,
+} from '@nestjs/common';
+import { OandaApiError, OandaProvider } from './providers/oanda/oanda.provider';
+import type { OandaErrorCategory } from './providers/oanda/oanda.provider';
 
 export enum ProviderType {
-  TWELVE_DATA = 'TWELVE_DATA',
-  ALPHA_VANTAGE = 'ALPHA_VANTAGE',
-  SIMULATED = 'SIMULATED',
+  OANDA = 'OANDA',
 }
 
 export enum ProviderStatus {
+  UNVERIFIED = 'UNVERIFIED',
   AVAILABLE = 'AVAILABLE',
-  QUOTA_EXHAUSTED = 'QUOTA_EXHAUSTED',
+  INVALID_CREDENTIALS = 'INVALID_CREDENTIALS',
+  ACCOUNT_ACCESS_DENIED = 'ACCOUNT_ACCESS_DENIED',
+  ACCOUNT_ID_REQUIRED = 'ACCOUNT_ID_REQUIRED',
+  RATE_LIMITED = 'RATE_LIMITED',
   ERROR = 'ERROR',
   DISABLED = 'DISABLED',
 }
 
-interface CachedQuote {
-  symbol: string;
-  data: any;
-  timestamp: number;
-  provider: ProviderType;
-}
-
-interface CachedCandles {
-  symbol: string;
-  interval: string;
-  data: any[];
-  timestamp: number;
-  provider: ProviderType;
-}
-
-interface ProviderState {
-  type: ProviderType;
-  status: ProviderStatus;
-  quotaExhaustedAt?: number;
-  quotaResetTime?: number;
-  errorCount: number;
-  lastErrorAt?: number;
-  requestCount: number;
-  cacheHits: number;
-}
+type MarketDataCapability = 'candles' | 'quotes';
 
 @Injectable()
 export class MarketDataManagerService implements OnModuleInit {
   private readonly logger = new Logger(MarketDataManagerService.name);
+  private readonly quoteCache = new Map<string, { data: any; timestamp: number }>();
+  private readonly candleCache = new Map<string, { data: any[]; timestamp: number }>();
+  private readonly pendingQuotes = new Map<string, Promise<any>>();
+  private readonly pendingCandles = new Map<string, Promise<any[]>>();
+  private status = ProviderStatus.DISABLED;
+  private lastError: string | null = null;
+  private errorCategory: OandaErrorCategory | null = null;
+  private quoteStatus = ProviderStatus.DISABLED;
+  private quoteErrorCategory: OandaErrorCategory | null = null;
+  private quoteLastError: string | null = null;
+  private retryAfter = 0;
+  private readonly quoteTtl = Number(process.env.MARKET_DATA_QUOTE_CACHE_TTL || 30000);
+  private readonly candleTtl = Number(process.env.MARKET_DATA_CANDLE_CACHE_TTL || 300000);
 
-  // Configuration
-  private readonly primaryProvider: ProviderType;
-  private readonly quoteCacheTTL: number;
-  private readonly candleCacheTTL: number;
-  private readonly pollingInterval: number;
-  private readonly quotaResetHour: number; // UTC hour when quota resets
-
-  // Caches
-  private quoteCache: Map<string, CachedQuote> = new Map();
-  private candleCache: Map<string, CachedCandles> = new Map();
-
-  // In-flight request tracking
-  private pendingQuoteRequests: Map<string, Promise<any>> = new Map();
-  private pendingCandleRequests: Map<string, Promise<any>> = new Map();
-
-  // Provider state
-  private providerStates: Map<ProviderType, ProviderState> = new Map();
-
-  // Polling scheduler
-  private pollingTimer: NodeJS.Timeout | null = null;
-  private subscribedSymbols: Set<string> = new Set();
-
-  constructor(
-    private readonly configService: ConfigService,
-    private readonly twelveData: TwelveDataProvider,
-    private readonly alphaVantage: AlphaVantageProvider,
-  ) {
-    // Load configuration
-    this.primaryProvider = this.parseProviderType(
-      this.configService.get<string>('MARKET_DATA_PROVIDER', 'TWELVE_DATA')
-    );
-    this.quoteCacheTTL = parseInt(
-      this.configService.get<string>('MARKET_DATA_QUOTE_CACHE_TTL', '30000'),
-      10
-    );
-    this.candleCacheTTL = parseInt(
-      this.configService.get<string>('MARKET_DATA_CANDLE_CACHE_TTL', '300000'),
-      10
-    );
-    this.pollingInterval = parseInt(
-      this.configService.get<string>('MARKET_DATA_POLLING_INTERVAL', '20000'),
-      10
-    );
-    this.quotaResetHour = parseInt(
-      this.configService.get<string>('MARKET_DATA_QUOTA_RESET_HOUR', '0'),
-      10
-    );
-
-    // Initialize provider states
-    this.initializeProviderStates();
-  }
-
-  async onModuleInit() {
-    this.logger.log('🚀 Market Data Manager initialized');
-    this.logger.log(`Primary Provider: ${this.primaryProvider}`);
-    this.logger.log(`Quote Cache TTL: ${this.quoteCacheTTL}ms`);
-    this.logger.log(`Candle Cache TTL: ${this.candleCacheTTL}ms`);
-    this.logger.log(`Polling Interval: ${this.pollingInterval}ms`);
-    this.logger.log(`Quota Reset Hour: ${this.quotaResetHour} UTC`);
-
-    // Check for quota cooldowns from previous session
-    this.checkQuotaCooldowns();
-
-    // Start polling scheduler
-    this.startPolling();
-  }
-
-  /**
-   * Initialize provider states
-   */
-  private initializeProviderStates(): void {
-    this.providerStates.set(ProviderType.TWELVE_DATA, {
-      type: ProviderType.TWELVE_DATA,
-      status: this.twelveData.isConfigured() ? ProviderStatus.AVAILABLE : ProviderStatus.DISABLED,
-      errorCount: 0,
-      requestCount: 0,
-      cacheHits: 0,
-    });
-
-    this.providerStates.set(ProviderType.ALPHA_VANTAGE, {
-      type: ProviderType.ALPHA_VANTAGE,
-      status: this.alphaVantage.isConfigured() ? ProviderStatus.AVAILABLE : ProviderStatus.DISABLED,
-      errorCount: 0,
-      requestCount: 0,
-      cacheHits: 0,
-    });
-
-    this.providerStates.set(ProviderType.SIMULATED, {
-      type: ProviderType.SIMULATED,
-      status: ProviderStatus.AVAILABLE,
-      errorCount: 0,
-      requestCount: 0,
-      cacheHits: 0,
-    });
-  }
-
-  /**
-   * Check if any providers have quota cooldowns that should be reset
-   */
-  private checkQuotaCooldowns(): void {
-    const now = Date.now();
-    const providers = [ProviderType.TWELVE_DATA, ProviderType.ALPHA_VANTAGE];
-
-    for (const providerType of providers) {
-      const state = this.providerStates.get(providerType);
-      if (!state) continue;
-
-      if (state.status === ProviderStatus.QUOTA_EXHAUSTED) {
-        // Check if quota reset time has passed
-        if (state.quotaResetTime && now >= state.quotaResetTime) {
-          this.logger.log(`✅ Quota cooldown expired for ${providerType}, resetting to AVAILABLE`);
-          state.status = ProviderStatus.AVAILABLE;
-          state.quotaExhaustedAt = undefined;
-          state.quotaResetTime = undefined;
-          state.errorCount = 0;
-        } else {
-          const resetTime = state.quotaResetTime
-            ? new Date(state.quotaResetTime).toISOString()
-            : 'unknown';
-          this.logger.warn(`⚠️  ${providerType} still in quota exhaustion cooldown until ${resetTime}`);
-        }
-      } else if (state.status === ProviderStatus.ERROR) {
-        // Automatically recover from ERROR state after 5 minutes if not quota-related
-        const timeSinceError = state.lastErrorAt ? now - state.lastErrorAt : Infinity;
-        if (timeSinceError > 300000) { // 5 minutes
-          this.logger.log(`🔄 ${providerType} ERROR state expired, resetting to AVAILABLE`);
-          state.status = ProviderStatus.AVAILABLE;
-          state.errorCount = 0;
-          state.lastErrorAt = undefined;
-        } else {
-          const minutesRemaining = Math.ceil((300000 - timeSinceError) / 60000);
-          this.logger.warn(`⚠️  ${providerType} in ERROR state, auto-recovery in ${minutesRemaining}min`);
-        }
-      }
-    }
-  }
-
-  /**
-   * Get quote for symbol with caching and provider fallback
-   */
-  async getQuote(symbol: string, mode: 'LIVE' | 'SIMULATED' = 'LIVE'): Promise<any> {
-    // SIMULATED mode always uses simulated data
-    if (mode === 'SIMULATED') {
-      return this.getSimulatedQuote(symbol);
-    }
-
-    // LIVE mode: Check cache first
-    const cached = this.quoteCache.get(symbol);
-    const now = Date.now();
-
-    if (cached && (now - cached.timestamp) < this.quoteCacheTTL) {
-      const state = this.providerStates.get(cached.provider);
-      if (state) {
-        state.cacheHits++;
-      }
-      this.logger.debug(`📦 Cache HIT for ${symbol} (age: ${Math.round((now - cached.timestamp) / 1000)}s, provider: ${cached.provider})`);
-      return {
-        ...cached.data,
-        cached: true,
-        cacheAge: now - cached.timestamp,
-        provider: cached.provider,
-      };
-    }
-
-    // Check for in-flight request
-    const pending = this.pendingQuoteRequests.get(symbol);
-    if (pending) {
-      this.logger.debug(`♻️  Reusing in-flight request for ${symbol}`);
-      return pending;
-    }
-
-    // Create new request with deduplication
-    const requestPromise = this.fetchQuoteFromProvider(symbol);
-    this.pendingQuoteRequests.set(symbol, requestPromise);
-
-    try {
-      const result = await requestPromise;
-      return result;
-    } finally {
-      this.pendingQuoteRequests.delete(symbol);
-    }
-  }
-
-  /**
-   * Fetch quote from available provider with fallback
-   */
-  private async fetchQuoteFromProvider(symbol: string): Promise<any> {
-    const providers = [this.primaryProvider, ProviderType.ALPHA_VANTAGE];
-    let lastError: Error | null = null;
-
-    for (const providerType of providers) {
-      const state = this.providerStates.get(providerType);
-      
-      if (!state || state.status !== ProviderStatus.AVAILABLE) {
-        this.logger.debug(`Skipping ${providerType}: status=${state?.status}`);
-        continue;
-      }
-
-      try {
-        const data = await this.fetchQuoteFromSpecificProvider(providerType, symbol);
-        state.requestCount++;
-
-        // Cache the result
-        this.quoteCache.set(symbol, {
-          symbol,
-          data,
-          timestamp: Date.now(),
-          provider: providerType,
-        });
-
-        this.logger.debug(`✅ Fetched quote for ${symbol} from ${providerType} (request #${state.requestCount})`);
-
-        return {
-          ...data,
-          cached: false,
-          provider: providerType,
-        };
-      } catch (error) {
-        lastError = error as Error;
-        this.handleProviderError(providerType, error);
-        this.logger.warn(`${providerType} failed for ${symbol}, trying next provider...`);
-        continue;
-      }
-    }
-
-    // No providers succeeded
-    const availableProviders = Array.from(this.providerStates.entries())
-      .filter(([_, state]) => state.status !== ProviderStatus.DISABLED)
-      .map(([type, state]) => `${type}:${state.status}`)
-      .join(', ');
-
-    throw new Error(
-      `No market data providers available for symbol ${symbol}. ` +
-      `Provider states: ${availableProviders}. ` +
-      `Last error: ${lastError?.message || 'unknown'}. ` +
-      `Please use SIMULATED mode or wait for provider recovery.`
-    );
-  }
-
-  /**
-   * Fetch quote from a specific provider
-   */
-  private async fetchQuoteFromSpecificProvider(providerType: ProviderType, symbol: string): Promise<any> {
-    switch (providerType) {
-      case ProviderType.TWELVE_DATA:
-        return await this.twelveData.getQuote(symbol);
-      
-      case ProviderType.ALPHA_VANTAGE:
-        return await this.alphaVantage.getQuote(symbol);
-      
-      default:
-        throw new Error(`Unsupported provider: ${providerType}`);
-    }
-  }
-
-  /**
-   * Get candles for symbol with caching
-   */
-  async getCandles(
-    symbol: string,
-    interval: string,
-    outputsize: number,
-    mode: 'LIVE' | 'SIMULATED' = 'LIVE'
-  ): Promise<any[]> {
-    // SIMULATED mode always uses simulated data
-    if (mode === 'SIMULATED') {
-      return this.getSimulatedCandles(symbol, interval, outputsize);
-    }
-
-    // LIVE mode: Check cache first
-    const cacheKey = `${symbol}:${interval}:${outputsize}`;
-    const cached = this.candleCache.get(cacheKey);
-    const now = Date.now();
-
-    if (cached && (now - cached.timestamp) < this.candleCacheTTL) {
-      const state = this.providerStates.get(cached.provider);
-      if (state) {
-        state.cacheHits++;
-      }
-      this.logger.debug(
-        `📦 Candle cache HIT for ${symbol} ${interval} (age: ${Math.round((now - cached.timestamp) / 1000)}s, provider: ${cached.provider})`
+  constructor(private readonly oanda: OandaProvider) {
+    this.status = oanda.isConfigured() ? ProviderStatus.UNVERIFIED : ProviderStatus.DISABLED;
+    if (!oanda.isConfigured()) {
+      this.errorCategory = 'NOT_CONFIGURED';
+      this.lastError = this.safeError(new OandaApiError('NOT_CONFIGURED', 'OANDA credentials are not configured.'));
+      this.quoteErrorCategory = 'NOT_CONFIGURED';
+      this.quoteLastError = this.lastError;
+    } else if (!oanda.getConfigurationStatus().accountSpecificPricingAvailable) {
+      this.quoteStatus = ProviderStatus.ACCOUNT_ID_REQUIRED;
+      this.quoteErrorCategory = 'ACCOUNT_ID_REQUIRED';
+      this.quoteLastError = this.safeError(
+        new OandaApiError('ACCOUNT_ID_REQUIRED', 'Account-specific pricing requires an OANDA account ID.'),
       );
-      return cached.data;
-    }
-
-    // Check for in-flight request
-    const pending = this.pendingCandleRequests.get(cacheKey);
-    if (pending) {
-      this.logger.debug(`♻️  Reusing in-flight candle request for ${symbol} ${interval}`);
-      return pending;
-    }
-
-    // Create new request with deduplication
-    const requestPromise = this.fetchCandlesFromProvider(symbol, interval, outputsize);
-    this.pendingCandleRequests.set(cacheKey, requestPromise);
-
-    try {
-      const result = await requestPromise;
-      return result;
-    } finally {
-      this.pendingCandleRequests.delete(cacheKey);
-    }
-  }
-
-  /**
-   * Fetch candles from available provider with fallback
-   */
-  private async fetchCandlesFromProvider(
-    symbol: string,
-    interval: string,
-    outputsize: number
-  ): Promise<any[]> {
-    const cacheKey = `${symbol}:${interval}:${outputsize}`;
-    const providers = [this.primaryProvider, ProviderType.ALPHA_VANTAGE];
-    let lastError: Error | null = null;
-
-    for (const providerType of providers) {
-      const state = this.providerStates.get(providerType);
-      
-      if (!state || state.status !== ProviderStatus.AVAILABLE) {
-        this.logger.debug(`Skipping ${providerType}: status=${state?.status}`);
-        continue;
-      }
-
-      try {
-        const data = await this.fetchCandlesFromSpecificProvider(providerType, symbol, interval, outputsize);
-        state.requestCount++;
-
-        // Cache the result
-        this.candleCache.set(cacheKey, {
-          symbol,
-          interval,
-          data,
-          timestamp: Date.now(),
-          provider: providerType,
-        });
-
-        this.logger.debug(
-          `✅ Fetched ${data.length} candles for ${symbol} ${interval} from ${providerType} (request #${state.requestCount})`
-        );
-
-        return data;
-      } catch (error) {
-        lastError = error as Error;
-        this.handleProviderError(providerType, error);
-        this.logger.warn(`${providerType} failed for ${symbol} ${interval}, trying next provider...`);
-        continue;
-      }
-    }
-
-    // No providers succeeded
-    const availableProviders = Array.from(this.providerStates.entries())
-      .filter(([_, state]) => state.status !== ProviderStatus.DISABLED)
-      .map(([type, state]) => `${type}:${state.status}`)
-      .join(', ');
-
-    throw new Error(
-      `No market data providers available for candles ${symbol} ${interval}. ` +
-      `Provider states: ${availableProviders}. ` +
-      `Last error: ${lastError?.message || 'unknown'}. ` +
-      `Please use SIMULATED mode or wait for provider recovery.`
-    );
-  }
-
-  /**
-   * Fetch candles from a specific provider
-   */
-  private async fetchCandlesFromSpecificProvider(
-    providerType: ProviderType,
-    symbol: string,
-    interval: string,
-    outputsize: number
-  ): Promise<any[]> {
-    switch (providerType) {
-      case ProviderType.TWELVE_DATA:
-        return await this.twelveData.getTimeSeries(symbol, interval, outputsize);
-      
-      case ProviderType.ALPHA_VANTAGE:
-        return await this.alphaVantage.getTimeSeries(symbol, interval, outputsize);
-      
-      default:
-        throw new Error(`Unsupported provider: ${providerType}`);
-    }
-  }
-
-  /**
-   * Handle provider error and update state
-   */
-  private handleProviderError(providerType: ProviderType, error: any): void {
-    const state = this.providerStates.get(providerType);
-    if (!state) return;
-
-    state.errorCount++;
-    state.lastErrorAt = Date.now();
-
-    const errorMessage = error instanceof Error ? error.message : String(error);
-
-    // Check for quota exhaustion
-    if (errorMessage.includes('run out of API credits') || 
-        errorMessage.includes('quota') || 
-        errorMessage.includes('429')) {
-      this.logger.error(
-        `🚨 ${providerType} QUOTA EXHAUSTED: ${errorMessage}`
-      );
-
-      state.status = ProviderStatus.QUOTA_EXHAUSTED;
-      state.quotaExhaustedAt = Date.now();
-
-      // Calculate next reset time (next occurrence of quotaResetHour UTC)
-      const now = new Date();
-      const resetTime = new Date(now);
-      resetTime.setUTCHours(this.quotaResetHour, 0, 0, 0);
-
-      // If reset time is in the past today, move to tomorrow
-      if (resetTime.getTime() <= now.getTime()) {
-        resetTime.setUTCDate(resetTime.getUTCDate() + 1);
-      }
-
-      state.quotaResetTime = resetTime.getTime();
-
-      this.logger.warn(
-        `⏰ ${providerType} quota will reset at ${resetTime.toISOString()} (${Math.round((state.quotaResetTime - Date.now()) / 3600000)}h from now)`
-      );
-
-      // Stop polling to prevent further quota waste
-      this.stopPolling();
     } else {
-      this.logger.error(`❌ ${providerType} error: ${errorMessage}`);
-      state.status = ProviderStatus.ERROR;
+      this.quoteStatus = ProviderStatus.UNVERIFIED;
     }
   }
 
-  /**
-   * Get simulated quote (placeholder)
-   */
-  private getSimulatedQuote(symbol: string): any {
-    // Return placeholder indicating simulated mode
-    // Actual simulated data comes from SimulatedMarketEngineService
+  async onModuleInit(): Promise<void> {
+    if (!this.oanda.isConfigured()) return;
+    try {
+      await this.oanda.validateCredentials();
+      this.status = ProviderStatus.AVAILABLE;
+      this.errorCategory = null;
+      this.lastError = null;
+      if (this.quoteStatus !== ProviderStatus.ACCOUNT_ID_REQUIRED) {
+        this.quoteStatus = ProviderStatus.UNVERIFIED;
+        this.quoteErrorCategory = null;
+        this.quoteLastError = null;
+      }
+      this.logger.log(`OANDA ${this.oanda.getEnvironment()} credentials validated.`);
+    } catch (error) {
+      this.recordError(error, 'candles');
+    }
+  }
+
+  async getQuote(symbol: string): Promise<any> {
+    return this.getCached(
+      this.quoteCache,
+      this.pendingQuotes,
+      symbol.toUpperCase(),
+      this.quoteTtl,
+      () => this.oanda.getQuote(symbol),
+      'quotes',
+    );
+  }
+
+  async getCandles(symbol: string, interval: string, count: number): Promise<any[]> {
+    const key = `${symbol.toUpperCase()}:${interval}:${count}`;
+    return this.getCached(
+      this.candleCache,
+      this.pendingCandles,
+      key,
+      this.candleTtl,
+      () => this.oanda.getTimeSeries(symbol, interval, count),
+      'candles',
+    );
+  }
+
+  async getInstruments(): Promise<string[]> {
+    this.assertProviderCanBeCalled('quotes');
+    try {
+      const instruments = await this.oanda.getAvailableInstruments();
+      this.quoteStatus = ProviderStatus.AVAILABLE;
+      this.quoteErrorCategory = null;
+      this.quoteLastError = null;
+      return instruments;
+    } catch (error) {
+      this.recordError(error, 'quotes');
+      throw this.toHttpException(error);
+    }
+  }
+
+  getProviderStatus() {
+    const configuration = this.oanda.getConfigurationStatus();
     return {
-      symbol,
-      simulated: true,
-      message: 'Use SimulatedMarketEngineService for simulated quotes',
-    };
-  }
-
-  /**
-   * Get simulated candles (placeholder)
-   */
-  private getSimulatedCandles(symbol: string, interval: string, outputsize: number): any[] {
-    // Return placeholder indicating simulated mode
-    // Actual simulated candles should come from backend candle generator
-    return [];
-  }
-
-  /**
-   * Subscribe symbol for polling
-   */
-  subscribeSymbol(symbol: string): void {
-    if (!this.subscribedSymbols.has(symbol)) {
-      this.subscribedSymbols.add(symbol);
-      this.logger.log(`📊 Subscribed to ${symbol} for polling (total: ${this.subscribedSymbols.size})`);
-    }
-  }
-
-  /**
-   * Unsubscribe symbol from polling
-   */
-  unsubscribeSymbol(symbol: string): void {
-    if (this.subscribedSymbols.has(symbol)) {
-      this.subscribedSymbols.delete(symbol);
-      this.logger.log(`📊 Unsubscribed from ${symbol} (remaining: ${this.subscribedSymbols.size})`);
-    }
-  }
-
-  /**
-   * Start polling scheduler
-   */
-  private startPolling(): void {
-    if (this.pollingTimer) {
-      return;
-    }
-
-    this.logger.log(`🔄 Starting market data polling (interval: ${this.pollingInterval}ms)`);
-
-    const poll = async () => {
-      if (this.subscribedSymbols.size === 0) {
-        // No symbols to poll
-        return;
-      }
-
-      const state = this.providerStates.get(this.primaryProvider);
-      if (!state || state.status !== ProviderStatus.AVAILABLE) {
-        this.logger.debug(`⏸️  Skipping poll - ${this.primaryProvider} is ${state?.status}`);
-        return;
-      }
-
-      this.logger.debug(
-        `🔄 Polling ${this.subscribedSymbols.size} symbols (${Array.from(this.subscribedSymbols).join(', ')})`
-      );
-
-      // Poll all subscribed symbols
-      // Don't await to prevent blocking
-      for (const symbol of this.subscribedSymbols) {
-        this.getQuote(symbol, 'LIVE').catch((error) => {
-          // Errors are already logged in handleProviderError
-        });
-      }
-    };
-
-    // Start polling loop
-    this.pollingTimer = setInterval(poll, this.pollingInterval);
-
-    // Do initial poll
-    poll();
-  }
-
-  /**
-   * Stop polling scheduler
-   */
-  private stopPolling(): void {
-    if (this.pollingTimer) {
-      clearInterval(this.pollingTimer);
-      this.pollingTimer = null;
-      this.logger.log('⏸️  Stopped market data polling due to quota exhaustion');
-    }
-  }
-
-  /**
-   * Get provider status
-   */
-  getProviderStatus(): Record<string, any> {
-    const status: Record<string, any> = {};
-
-    for (const [providerType, state] of this.providerStates.entries()) {
-      status[providerType] = {
-        status: state.status,
-        requestCount: state.requestCount,
-        cacheHits: state.cacheHits,
-        errorCount: state.errorCount,
-        quotaExhaustedAt: state.quotaExhaustedAt
-          ? new Date(state.quotaExhaustedAt).toISOString()
-          : null,
-        quotaResetTime: state.quotaResetTime
-          ? new Date(state.quotaResetTime).toISOString()
-          : null,
-        hoursUntilReset: state.quotaResetTime
-          ? Math.round((state.quotaResetTime - Date.now()) / 3600000)
-          : null,
-      };
-    }
-
-    return {
-      primaryProvider: this.primaryProvider,
-      providers: status,
+      primaryProvider: ProviderType.OANDA,
+      configuration,
+      errorCategory: this.errorCategory,
+      providers: {
+        OANDA: {
+          status: this.status,
+          errorCategory: this.errorCategory,
+          lastError: this.lastError,
+          candleStatus: this.status,
+          candleErrorCategory: this.errorCategory,
+          candleLastError: this.lastError,
+          quoteStatus: this.quoteStatus,
+          quoteErrorCategory: this.quoteErrorCategory,
+          quoteLastError: this.quoteLastError,
+          retryAfter: this.retryAfter || null,
+          ...configuration,
+        },
+      },
       quoteCacheSize: this.quoteCache.size,
       candleCacheSize: this.candleCache.size,
-      subscribedSymbols: Array.from(this.subscribedSymbols),
-      pollingActive: this.pollingTimer !== null,
     };
   }
 
-  /**
-   * Parse provider type from string
-   */
-  private parseProviderType(value: string): ProviderType {
-    const normalized = value.toUpperCase().replace(/[^A-Z_]/g, '_');
-    if (normalized in ProviderType) {
-      return ProviderType[normalized as keyof typeof ProviderType];
+  getCandleProvider(): ProviderType { return ProviderType.OANDA; }
+
+  private async getCached<T>(
+    cache: Map<string, { data: T; timestamp: number }>,
+    pending: Map<string, Promise<T>>,
+    key: string,
+    ttl: number,
+    fetcher: () => Promise<T>,
+    capability: MarketDataCapability,
+  ): Promise<T> {
+    const cached = cache.get(key);
+    if (cached && Date.now() - cached.timestamp < ttl) return cached.data;
+    const existing = pending.get(key);
+    if (existing) return existing;
+    this.assertProviderCanBeCalled(capability);
+    const request = fetcher()
+      .then((data) => {
+        cache.set(key, { data, timestamp: Date.now() });
+        this.recordSuccess(capability);
+        this.retryAfter = 0;
+        return data;
+      })
+      .catch((error: unknown) => {
+        this.recordError(error, capability);
+        throw this.toHttpException(error);
+      })
+      .finally(() => pending.delete(key));
+    pending.set(key, request);
+    return request;
+  }
+
+  private assertProviderCanBeCalled(capability: MarketDataCapability): void {
+    const status = capability === 'candles' ? this.status : this.quoteStatus;
+    const category = capability === 'candles' ? this.errorCategory : this.quoteErrorCategory;
+    if (status === ProviderStatus.INVALID_CREDENTIALS) {
+      throw this.toHttpException(new OandaApiError('INVALID_CREDENTIALS', 'OANDA rejected the token.'));
     }
-    this.logger.warn(`Unknown provider type: ${value}, defaulting to TWELVE_DATA`);
-    return ProviderType.TWELVE_DATA;
+    if (status === ProviderStatus.ACCOUNT_ACCESS_DENIED) {
+      throw this.toHttpException(new OandaApiError('ACCOUNT_ACCESS', 'OANDA denied access to this account.'));
+    }
+    if (status === ProviderStatus.ACCOUNT_ID_REQUIRED || category === 'ACCOUNT_ID_REQUIRED') {
+      throw this.toHttpException(new OandaApiError(
+        'ACCOUNT_ID_REQUIRED',
+        'OANDA account-specific pricing requires OANDA_ACCOUNT_ID.',
+      ));
+    }
+    if (status === ProviderStatus.DISABLED) {
+      throw this.toHttpException(new OandaApiError('NOT_CONFIGURED', 'OANDA credentials are not configured.'));
+    }
+    if (this.retryAfter > Date.now()) {
+      throw this.toHttpException(new OandaApiError('RATE_LIMITED', 'OANDA rate limited the request.', this.retryAfter - Date.now()));
+    }
   }
 
-  /**
-   * Clear all caches
-   */
-  clearCaches(): void {
-    this.quoteCache.clear();
-    this.candleCache.clear();
-    this.logger.log('🗑️  Cleared all caches');
+  private recordSuccess(capability: MarketDataCapability): void {
+    if (capability === 'candles') {
+      this.status = ProviderStatus.AVAILABLE;
+      this.errorCategory = null;
+      this.lastError = null;
+      return;
+    }
+    this.quoteStatus = ProviderStatus.AVAILABLE;
+    this.quoteErrorCategory = null;
+    this.quoteLastError = null;
   }
 
-  /**
-   * Manually reset provider status (for admin use or auto-recovery)
-   */
-  resetProviderStatus(providerType: ProviderType): void {
-    const state = this.providerStates.get(providerType);
-    if (state) {
-      const oldStatus = state.status;
-      state.status = ProviderStatus.AVAILABLE;
-      state.quotaExhaustedAt = undefined;
-      state.quotaResetTime = undefined;
-      state.errorCount = 0;
-      state.lastErrorAt = undefined;
-      this.logger.log(`🔄 Manually reset ${providerType} status from ${oldStatus} to AVAILABLE`);
-
-      // Restart polling if it was stopped
-      if (!this.pollingTimer) {
-        this.startPolling();
+  private recordError(error: unknown, capability: MarketDataCapability): void {
+    const category = error instanceof OandaApiError ? error.category : 'PROVIDER';
+    const nextStatus = category === 'INVALID_CREDENTIALS'
+      ? ProviderStatus.INVALID_CREDENTIALS
+      : category === 'ACCOUNT_ACCESS'
+        ? ProviderStatus.ACCOUNT_ACCESS_DENIED
+        : category === 'ACCOUNT_ID_REQUIRED'
+          ? ProviderStatus.ACCOUNT_ID_REQUIRED
+          : category === 'NOT_CONFIGURED'
+            ? ProviderStatus.DISABLED
+            : category === 'RATE_LIMITED'
+              ? ProviderStatus.RATE_LIMITED
+              : ProviderStatus.ERROR;
+    const message = this.safeError(error);
+    if (capability === 'candles') {
+      this.errorCategory = category;
+      this.lastError = message;
+      this.status = nextStatus;
+      if (category === 'INVALID_CREDENTIALS' || category === 'NOT_CONFIGURED') {
+        this.quoteErrorCategory = category;
+        this.quoteLastError = message;
+        this.quoteStatus = nextStatus;
       }
+    } else {
+      this.quoteErrorCategory = category;
+      this.quoteLastError = message;
+      this.quoteStatus = nextStatus;
+    }
+    if (category === 'RATE_LIMITED') {
+      this.retryAfter = Date.now() + (error instanceof OandaApiError ? error.retryAfterMs : 60000);
+    }
+    this.logger.warn(`OANDA ${capability} error category=${category}: ${message}`);
+  }
+
+  private safeError(error: unknown): string {
+    const category = error instanceof OandaApiError ? error.category : 'PROVIDER';
+    switch (category) {
+      case 'NOT_CONFIGURED':
+        return 'OANDA candle data is not configured. Set OANDA_API_TOKEN in the backend environment.';
+      case 'INVALID_CREDENTIALS':
+        return error instanceof OandaApiError
+          ? error.message
+          : 'OANDA rejected the credentials. Check the token and ensure OANDA_ENVIRONMENT matches the account.';
+      case 'ACCOUNT_ACCESS':
+        return error instanceof OandaApiError
+          ? error.message
+          : 'OANDA denied access to this account. Check account ownership and environment.';
+      case 'ACCOUNT_ID_REQUIRED':
+        return 'OANDA candle data is available, but OANDA_ACCOUNT_ID is required for account-specific instruments and bid/ask prices.';
+      case 'INSTRUMENT_UNAVAILABLE':
+        return error instanceof Error ? error.message : 'The instrument is unavailable for this OANDA account.';
+      case 'UNSUPPORTED_INTERVAL':
+        return error instanceof Error ? error.message : 'The requested interval is unsupported by OANDA.';
+      case 'RATE_LIMITED':
+        return error instanceof OandaApiError
+          ? error.message
+          : 'OANDA market data is rate limited. Retry after the indicated delay.';
+      case 'EMPTY_CANDLES':
+        return error instanceof Error ? error.message : 'OANDA returned no complete candles for this request.';
+      case 'NETWORK':
+        return error instanceof OandaApiError && error.message.startsWith('OANDA service returned HTTP')
+          ? error.message
+          : 'OANDA market data is temporarily unavailable. Please retry later.';
+      default:
+        return error instanceof Error && error.message.startsWith('OANDA')
+          ? error.message
+          : 'OANDA market data is temporarily unavailable. Please retry later.';
     }
   }
 
-  /**
-   * Force check and auto-recover all providers
-   */
-  autoRecoverProviders(): void {
-    this.logger.log('🔍 Running auto-recovery check for all providers');
-    this.checkQuotaCooldowns();
-    
-    // Also check if provider is configured but marked as error
-    const twelveDataState = this.providerStates.get(ProviderType.TWELVE_DATA);
-    if (twelveDataState && twelveDataState.status === ProviderStatus.ERROR && this.twelveData.isConfigured()) {
-      this.logger.log('🔄 Provider configured but in ERROR state, attempting recovery');
-      this.resetProviderStatus(ProviderType.TWELVE_DATA);
-    }
+  private toHttpException(error: unknown): HttpException {
+    const category = error instanceof OandaApiError ? error.category : 'PROVIDER';
+    const message = this.safeError(error);
+    const retryAfterMs = error instanceof OandaApiError ? error.retryAfterMs : 0;
+    const body = { success: false, provider: 'OANDA', category, message, retryable: ['RATE_LIMITED', 'NETWORK', 'PROVIDER'].includes(category), retryAfterMs: retryAfterMs || undefined };
+    if (category === 'INVALID_CREDENTIALS') return new UnauthorizedException(body);
+    if (category === 'ACCOUNT_ACCESS') return new ForbiddenException(body);
+    if (category === 'ACCOUNT_ID_REQUIRED') return new ServiceUnavailableException(body);
+    if (category === 'INSTRUMENT_UNAVAILABLE') return new NotFoundException(body);
+    if (category === 'UNSUPPORTED_INTERVAL') return new BadRequestException(body);
+    if (category === 'RATE_LIMITED') return new HttpException(body, HttpStatus.TOO_MANY_REQUESTS);
+    if (category === 'NETWORK' || category === 'NOT_CONFIGURED') return new ServiceUnavailableException(body);
+    if (category === 'EMPTY_CANDLES' || category === 'PROVIDER') return new BadGatewayException(body);
+    return new HttpException(body, 502);
   }
 }

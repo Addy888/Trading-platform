@@ -5,7 +5,7 @@
  * 
  * Shows WebSocket connection state
  * 
- * IMPORTANT: Connection is to SIMULATED market data only
+ * Shows the WebSocket connection state only; market-data status is reported separately.
  */
 
 interface ConnectionStatusProps {
@@ -18,7 +18,7 @@ export function ConnectionStatus({ state }: ConnectionStatusProps) {
       case 'connected':
         return {
           color: 'bg-green-500',
-          text: 'Simulated Market Live',
+          text: 'Connected',
           icon: '●',
         };
       case 'connecting':

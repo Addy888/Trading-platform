@@ -191,7 +191,7 @@ export default function AdminTradingAccountsPage() {
                           </div>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                          {account.challengePlan.name}
+                          {account.challengePlan?.name || 'Direct Funded'}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                           {formatCurrency(account.currentBalance)}

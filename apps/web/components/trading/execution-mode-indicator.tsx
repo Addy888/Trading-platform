@@ -9,7 +9,7 @@ export function ExecutionModeIndicator({ mode, className = '' }: ExecutionModeIn
   const modeConfig = {
     SIMULATED: {
       label: 'SIMULATED MODE',
-      description: 'Paper trading with simulated market data',
+      description: 'Simulated execution using OANDA market data',
       bgColor: 'bg-blue-600',
       textColor: 'text-blue-100',
       borderColor: 'border-blue-500',

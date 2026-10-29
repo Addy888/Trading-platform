@@ -11,8 +11,10 @@ import { AdminKYCController } from './admin-kyc.controller';
 import { AdminKYCService } from './admin-kyc.service';
 import { AdminTradesController } from './admin-trades.controller';
 import { AdminTradesService } from './admin-trades.service';
+import { PaymentsModule } from '../payments/payments.module';
 
 @Module({
+  imports: [PaymentsModule],
   controllers: [
     AdminController,
     AdminTradingAccountsController,

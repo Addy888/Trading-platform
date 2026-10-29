@@ -2,11 +2,12 @@
 
 interface MarketWatchProps {
   symbols: string[];
-  quotes: Record<string, { bid: string; ask: string; spread: string }>;
+  quotes: Record<string, { bid: string; ask: string; spread: string; price?: string }>;
   selectedSymbol: string;
   onSymbolSelect: (symbol: string) => void;
   loading?: boolean;
-  dataSource?: 'TWELVEDATA' | 'SIMULATED';
+  dataSource?: 'OANDA';
+  unavailableMessage?: string | null;
 }
 
 export function MarketWatch({ 
@@ -15,7 +16,8 @@ export function MarketWatch({
   selectedSymbol, 
   onSymbolSelect,
   loading = false,
-  dataSource = 'SIMULATED'
+  dataSource,
+  unavailableMessage,
 }: MarketWatchProps) {
   const formatPrice = (price: string, decimals: number = 5) => {
     const num = parseFloat(price);
@@ -48,16 +50,21 @@ export function MarketWatch({
       
       {dataSource && (
         <div className="mb-3 px-2 py-1 bg-gray-800 rounded text-xs text-gray-400 text-center">
-          Source: {dataSource === 'TWELVEDATA' ? 'Live (Twelve Data)' : 'Simulated'}
+          Source: {dataSource}
+        </div>
+      )}
+      {unavailableMessage && (
+        <div className="mb-3 px-2 py-2 bg-amber-950/50 rounded text-xs text-amber-200">
+          {unavailableMessage}
         </div>
       )}
       
       <div className="space-y-1">
         {symbols.map((symbol) => {
           const quote = quotes[symbol];
-          const bid = quote?.bid || '0';
-          const ask = quote?.ask || '0';
-          const spread = quote?.spread || '0';
+          const bid = quote?.bid || '';
+          const ask = quote?.ask || '';
+          const spread = quote?.spread || '';
           const isSelected = symbol === selectedSymbol;
           const decimals = getDecimals(symbol);
 
@@ -74,7 +81,7 @@ export function MarketWatch({
               <div className="flex items-center justify-between mb-2">
                 <span className="font-semibold text-sm">{symbol}</span>
                 <span className="text-xs text-gray-400">
-                  {parseFloat(spread).toFixed(decimals > 3 ? 1 : decimals)}
+                  {Number.isFinite(Number(spread)) && spread ? Number(spread).toFixed(decimals > 3 ? 1 : decimals) : '—'}
                 </span>
               </div>
               <div className="grid grid-cols-2 gap-2 text-xs">

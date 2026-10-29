@@ -1,4 +1,4 @@
-import { Controller, Get, Param, Query, UseGuards, Request, Post } from '@nestjs/common';
+import { Controller, Get, Param, Query, UseGuards, Request, Post, Body } from '@nestjs/common';
 import { TradingAccountsService } from './trading-accounts.service';
 import { RuleSnapshotBackfillService } from './rule-snapshot-backfill.service';
 import { AccountsQueryDto } from './dto/accounts-query.dto';
@@ -19,6 +19,17 @@ export class TradingAccountsController {
   @Get()
   findUserAccounts(@Request() req) {
     return this.tradingAccountsService.findUserAccounts(req.user.sub);
+  }
+
+  @Post()
+  createAccount(
+    @Request() req,
+    @Body() body?: { initialFundingAmount?: string | number },
+  ) {
+    return this.tradingAccountsService.createWalletFundedAccount(
+      req.user.sub,
+      body,
+    );
   }
 
   @Get(':id')

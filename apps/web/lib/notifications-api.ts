@@ -1,3 +1,5 @@
+import { authenticatedFetch } from './authenticated-fetch';
+
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
 
 export type NotificationType =
@@ -22,7 +24,7 @@ export interface Notification {
   priority: NotificationPriority;
   title: string;
   message: string;
-  data: any;
+  data: Record<string, unknown> | null;
   isRead: boolean;
   readAt: string | null;
   createdAt: string;
@@ -55,7 +57,7 @@ export interface NotificationPreferences {
 
 async function handleResponse(response: Response) {
   if (!response.ok) {
-    let errorData: any;
+    let errorData: { message?: string };
     try {
       errorData = await response.json();
     } catch {
@@ -87,11 +89,7 @@ export const notificationsApi = {
 
     const url = `${API_BASE_URL}/notifications${queryParams.toString() ? `?${queryParams}` : ''}`;
 
-    const response = await fetch(url, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    });
+    const response = await authenticatedFetch(url, token);
     return handleResponse(response);
   },
 
@@ -99,11 +97,7 @@ export const notificationsApi = {
    * Get unread notification count
    */
   async getUnreadCount(token: string): Promise<{ unreadCount: number }> {
-    const response = await fetch(`${API_BASE_URL}/notifications/unread-count`, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    });
+    const response = await authenticatedFetch(`${API_BASE_URL}/notifications/unread-count`, token);
     return handleResponse(response);
   },
 
@@ -111,11 +105,8 @@ export const notificationsApi = {
    * Mark notification as read
    */
   async markAsRead(token: string, notificationId: string): Promise<Notification> {
-    const response = await fetch(`${API_BASE_URL}/notifications/${notificationId}/read`, {
+    const response = await authenticatedFetch(`${API_BASE_URL}/notifications/${notificationId}/read`, token, {
       method: 'PATCH',
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
     });
     return handleResponse(response);
   },
@@ -124,11 +115,8 @@ export const notificationsApi = {
    * Mark all notifications as read
    */
   async markAllAsRead(token: string): Promise<{ count: number; message: string }> {
-    const response = await fetch(`${API_BASE_URL}/notifications/read-all`, {
+    const response = await authenticatedFetch(`${API_BASE_URL}/notifications/read-all`, token, {
       method: 'PATCH',
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
     });
     return handleResponse(response);
   },
@@ -137,11 +125,8 @@ export const notificationsApi = {
    * Delete notification
    */
   async deleteNotification(token: string, notificationId: string): Promise<{ message: string }> {
-    const response = await fetch(`${API_BASE_URL}/notifications/${notificationId}`, {
+    const response = await authenticatedFetch(`${API_BASE_URL}/notifications/${notificationId}`, token, {
       method: 'DELETE',
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
     });
     return handleResponse(response);
   },
@@ -150,11 +135,7 @@ export const notificationsApi = {
    * Get notification preferences
    */
   async getPreferences(token: string): Promise<NotificationPreferences> {
-    const response = await fetch(`${API_BASE_URL}/notification-preferences`, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    });
+    const response = await authenticatedFetch(`${API_BASE_URL}/notification-preferences`, token);
     return handleResponse(response);
   },
 
@@ -165,12 +146,9 @@ export const notificationsApi = {
     token: string,
     data: Partial<Omit<NotificationPreferences, 'id' | 'userId' | 'createdAt' | 'updatedAt'>>
   ): Promise<NotificationPreferences> {
-    const response = await fetch(`${API_BASE_URL}/notification-preferences`, {
+    const response = await authenticatedFetch(`${API_BASE_URL}/notification-preferences`, token, {
       method: 'PATCH',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
     });
     return handleResponse(response);

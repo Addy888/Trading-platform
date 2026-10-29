@@ -77,12 +77,10 @@ export class AdminTradingController {
     for (const trade of account.trades.filter(
       (t) => t.status === TradeStatus.OPEN,
     )) {
-      const currentPrice = this.marketPrice.getPrice(trade.symbol);
-      const unrealizedPnl = this.tradingEngine.calculateUnrealizedPnl(
-        trade.side,
-        trade.entryPrice,
+      const currentPrice = this.marketPrice.getExitPrice(trade.symbol, trade.side);
+      const unrealizedPnl = this.tradingEngine.calculateTradeUnrealizedPnl(
+        trade,
         currentPrice,
-        trade.volume,
       );
       totalUnrealizedPnl = totalUnrealizedPnl.plus(unrealizedPnl);
     }
@@ -95,7 +93,7 @@ export class AdminTradingController {
     return {
       accountNumber: account.accountNumber,
       user: account.user,
-      challengePlan: account.challengePlan.name,
+      challengePlan: account.challengePlan?.name || 'Direct Funded',
       initialBalance: account.initialBalance.toFixed(2),
       currentBalance: account.currentBalance.toFixed(2),
       equity: account.equity.toFixed(2),
@@ -135,13 +133,10 @@ export class AdminTradingController {
     });
 
     return openTrades.map((trade) => {
-      const currentPrice = this.marketPrice.getPrice(trade.symbol);
-      const unrealizedPnl = this.tradingEngine.calculateUnrealizedPnl(
-        trade.side,
-        trade.entryPrice,
-        currentPrice,
-        trade.volume,
-      );
+      const currentPrice = this.marketPrice.getAvailableExitPrice(trade.symbol, trade.side);
+      const unrealizedPnl = currentPrice
+        ? this.tradingEngine.calculateTradeUnrealizedPnl(trade, currentPrice)
+        : null;
 
       return {
         id: trade.id,
@@ -149,12 +144,12 @@ export class AdminTradingController {
         side: trade.side,
         volume: trade.volume.toString(),
         entryPrice: trade.entryPrice.toString(),
-        currentPrice: currentPrice.toString(),
-        unrealizedPnl: unrealizedPnl.toFixed(2),
+        currentPrice: currentPrice?.toString() ?? null,
+        unrealizedPnl: unrealizedPnl?.toFixed(2) ?? null,
         stopLoss: trade.stopLoss?.toString(),
         takeProfit: trade.takeProfit?.toString(),
         openedAt: trade.openedAt,
-        priceSource: this.marketPrice.getPriceSource(),
+        priceSource: currentPrice ? this.marketPrice.getPriceSource() : null,
       };
     });
   }

@@ -1,11 +1,13 @@
 import {
   Controller,
   Get,
+  Post,
   Param,
   Patch,
   Body,
   Query,
   UseGuards,
+  Request,
   DefaultValuePipe,
   ParseIntPipe,
 } from '@nestjs/common';
@@ -14,6 +16,7 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { Role } from '@prisma/client';
 import { AdminPaymentsService } from './admin-payments.service';
+import { AdminAdjustmentDto } from '../payments/dto/admin-adjustment.dto';
 
 @Controller('admin/payments')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -52,11 +55,21 @@ export class AdminPaymentsController {
   async updatePaymentStatus(
     @Param('id') id: string,
     @Body() dto: { status: string; notes?: string },
+    @Request() req: any,
   ) {
     return this.adminPaymentsService.updatePaymentStatus(
       id,
       dto.status,
       dto.notes,
+      req.user?.sub,
     );
+  }
+
+  @Post('adjust-balance')
+  async adjustBalance(
+    @Body() dto: AdminAdjustmentDto,
+    @Request() req: any,
+  ) {
+    return this.adminPaymentsService.adjustBalance(req.user.sub, dto);
   }
 }

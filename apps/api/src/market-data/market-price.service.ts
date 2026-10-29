@@ -1,114 +1,68 @@
-import { Injectable, BadRequestException, Inject, forwardRef } from '@nestjs/common';
+import { Injectable, ServiceUnavailableException } from '@nestjs/common';
+import { TradeSide } from '@prisma/client';
 import Decimal from 'decimal.js';
+import { MarketDataEngineService } from './market-data-engine.service';
 
-/**
- * Market Price Service
- * 
- * IMPORTANT: This service provides SIMULATED/DEMO market prices for development.
- * These are NOT real market prices and should NOT be used for live trading.
- * 
- * This abstraction allows future integration with:
- * - Live price feeds
- * - External broker APIs
- * - WebSocket price streams
- * - Third-party market data providers
- * 
- * Day 8: Now integrates with SimulatedMarketEngineService for real-time prices
- */
 @Injectable()
 export class MarketPriceService {
-  private simulatedMarketEngine: any = null;
-  
-  private readonly fallbackPrices: Map<string, number> = new Map([
-    // Forex pairs
-    ['EURUSD', 1.0850],
-    ['GBPUSD', 1.2650],
-    ['USDJPY', 149.50],
-    ['AUDUSD', 0.6550],
-    ['USDCAD', 1.3550],
-    
-    // Commodities
-    ['XAUUSD', 2050.50],  // Gold
-    ['XAGUSD', 24.50],    // Silver
-    ['WTIUSD', 75.50],    // Oil
-    
-    // Crypto
-    ['BTCUSD', 43500.00],
-    ['ETHUSD', 2250.00],
-  ]);
+  constructor(private readonly marketData: MarketDataEngineService) {}
 
-  /**
-   * Set simulated market engine (injected after construction to avoid circular dependency)
-   */
-  setSimulatedMarketEngine(engine: any) {
-    this.simulatedMarketEngine = engine;
+  getPrice(symbol: string): Decimal {
+    const price = this.getAvailableMidPrice(symbol);
+    if (price) return price;
+    throw new ServiceUnavailableException(
+      'OANDA market data is temporarily unavailable. Please retry later.',
+    );
   }
 
-  /**
-   * Get current simulated price for a symbol
-   * @param symbol Trading symbol (e.g., EURUSD, BTCUSD)
-   * @returns Decimal price value
-   * @throws BadRequestException if symbol is not supported
-   */
-  getPrice(symbol: string): Decimal {
-    const upperSymbol = symbol.toUpperCase();
-    
-    // Try to get price from simulated market engine if available
-    if (this.simulatedMarketEngine) {
-      const price = this.simulatedMarketEngine.getPrice(upperSymbol);
-      if (price) {
-        return price;
-      }
-    }
-    
-    // Fallback to static prices with variation
-    if (!this.fallbackPrices.has(upperSymbol)) {
-      throw new BadRequestException(
-        `Symbol ${symbol} is not supported. Available symbols: ${this.getSupportedSymbols().join(', ')}`
+  getAvailableMidPrice(symbol: string): Decimal | null {
+    if (!this.marketData.isMarketAvailable(symbol)) return null;
+    return this.marketData.getMidPrice(symbol);
+  }
+
+  getAvailableExitPrice(symbol: string, side: TradeSide): Decimal | null {
+    if (!this.marketData.isMarketAvailable(symbol)) return null;
+    return side === TradeSide.BUY
+      ? this.marketData.getBid(symbol)
+      : this.marketData.getAsk(symbol);
+  }
+
+  getEntryPrice(symbol: string, side: TradeSide): Decimal {
+    if (!this.marketData.isMarketAvailable(symbol)) {
+      throw new ServiceUnavailableException(
+        'A fresh OANDA bid/ask quote is required to open a position.',
       );
     }
-
-    const price = this.fallbackPrices.get(upperSymbol);
-    
-    // Add small random variation (±0.1%) to simulate price movement
-    // This makes the demo more realistic without being deterministic
-    const variation = (Math.random() - 0.5) * 0.002; // ±0.1%
-    const simulatedPrice = price * (1 + variation);
-
-    return new Decimal(simulatedPrice.toFixed(8));
+    const price = side === TradeSide.BUY
+      ? this.marketData.getAsk(symbol)
+      : this.marketData.getBid(symbol);
+    if (!price) {
+      throw new ServiceUnavailableException(
+        'A fresh OANDA bid/ask quote is required to open a position.',
+      );
+    }
+    return price;
   }
 
-  /**
-   * Get list of supported symbols
-   * @returns Array of symbol strings
-   */
+  getExitPrice(symbol: string, side: TradeSide): Decimal {
+    const price = this.getAvailableExitPrice(symbol, side);
+    if (!price) {
+      throw new ServiceUnavailableException(
+        'A fresh OANDA bid/ask quote is required to value or close a position.',
+      );
+    }
+    return price;
+  }
+
   getSupportedSymbols(): string[] {
-    if (this.simulatedMarketEngine) {
-      return this.simulatedMarketEngine.getSupportedSymbols();
-    }
-    return Array.from(this.fallbackPrices.keys()).sort();
+    return this.marketData.getSupportedSymbols();
   }
 
-  /**
-   * Check if a symbol is supported
-   * @param symbol Trading symbol
-   * @returns boolean
-   */
   isSymbolSupported(symbol: string): boolean {
-    if (this.simulatedMarketEngine) {
-      return this.simulatedMarketEngine.isSymbolSupported(symbol);
-    }
-    return this.fallbackPrices.has(symbol.toUpperCase());
+    return this.marketData.isSymbolSupported(symbol);
   }
 
-  /**
-   * Get price source description
-   * @returns String describing the price source
-   */
   getPriceSource(): string {
-    if (this.simulatedMarketEngine) {
-      return this.simulatedMarketEngine.getPriceSource();
-    }
-    return 'SIMULATED_DEMO';
+    return 'OANDA';
   }
 }

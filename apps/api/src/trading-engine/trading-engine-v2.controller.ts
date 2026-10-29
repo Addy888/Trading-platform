@@ -149,7 +149,7 @@ export class TradingEngineV2Controller {
     @Param('accountId') accountId: string,
     @Request() req: any,
   ) {
-    const marginInfo = await this.marginService.calculateAccountMargin(accountId);
+    const marginInfo = await this.marginService.calculateAccountMargin(accountId, req.user.userId);
 
     return {
       accountId: marginInfo.accountId,
