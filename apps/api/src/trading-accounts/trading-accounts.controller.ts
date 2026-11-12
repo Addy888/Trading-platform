@@ -24,12 +24,17 @@ export class TradingAccountsController {
   @Post()
   createAccount(
     @Request() req,
-    @Body() body?: { initialFundingAmount?: string | number },
+    @Body() body?: { initialFundingAmount?: string | number; testFunding?: boolean },
   ) {
     return this.tradingAccountsService.createWalletFundedAccount(
       req.user.sub,
       body,
     );
+  }
+
+  @Get('test-funding')
+  getTestFundingStatus(@Request() req) {
+    return this.tradingAccountsService.getTestFundingStatus(req.user.sub);
   }
 
   @Get(':id')

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { io, Socket } from 'socket.io-client';
 import { useAuth } from './auth-context';
 
@@ -28,28 +28,23 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
   const [connected, setConnected] = useState(false);
   const [authenticated, setAuthenticated] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [authFailed, setAuthFailed] = useState(false);
+  const authFailedTokenRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!accessToken) {
-      // Clean up socket if user logs out
-      if (socket) {
-        socket.disconnect();
-        setSocket(null);
-        setConnected(false);
-        setAuthenticated(false);
-      }
-      setAuthFailed(false);
+      authFailedTokenRef.current = null;
       return;
     }
 
     // Don't reconnect if authentication failed
-    if (authFailed) {
+    if (authFailedTokenRef.current === accessToken) {
       return;
     }
 
     // Create socket connection
     const socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:3001';
+    console.log('[Socket.IO] Connecting to:', socketUrl, 'namespace: /trading');
+    
     const newSocket = io(`${socketUrl}/trading`, {
       auth: {
         token: accessToken,
@@ -59,6 +54,7 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
       reconnectionDelayMax: 5000,
       reconnectionAttempts: 5,
       autoConnect: true,
+      transports: ['polling', 'websocket'], // Try polling first, then upgrade to websocket
     });
 
     // Connection event handlers
@@ -67,7 +63,7 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
       setConnected(true);
       setAuthenticated(false);
       setError(null);
-      setAuthFailed(false);
+      authFailedTokenRef.current = null;
     });
 
     newSocket.on('disconnect', (reason) => {
@@ -76,19 +72,23 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
       setAuthenticated(false);
       
       // Don't auto-reconnect on auth failures
-      if (reason === 'io server disconnect' && !authFailed) {
+      if (reason === 'io server disconnect' && authFailedTokenRef.current !== accessToken) {
         newSocket.connect();
       }
     });
 
     newSocket.on('connect_error', (err) => {
-      console.error('WebSocket connection error:', err.message);
+      console.error('[Socket.IO] Connection error:', err.message);
+      console.error('[Socket.IO] Error details:', {
+        message: err.message,
+        stack: err.stack,
+      });
       setError(err.message);
       setConnected(false);
       
       // Check if it's an auth error
       if (err.message.includes('Authentication') || err.message.includes('auth')) {
-        setAuthFailed(true);
+        authFailedTokenRef.current = accessToken;
         newSocket.disconnect();
       }
     });
@@ -105,7 +105,7 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
       // Stop reconnection on auth failures
       if (data.code === 'AUTH_FAILED' || data.code === 'UNAUTHORIZED') {
         setAuthenticated(false);
-        setAuthFailed(true);
+        authFailedTokenRef.current = accessToken;
         newSocket.disconnect();
       }
     });
@@ -120,7 +120,7 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
       setConnected(false);
       setAuthenticated(false);
     };
-  }, [accessToken, authFailed]);
+  }, [accessToken]);
 
   return (
     <SocketContext.Provider value={{ socket, connected, authenticated, error }}>

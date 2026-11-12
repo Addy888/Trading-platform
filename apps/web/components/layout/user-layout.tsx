@@ -7,6 +7,7 @@ import { useAuth } from '@/lib/auth-context';
 import { NotificationBell } from '@/components/notifications/NotificationBell';
 import {
   LayoutDashboard,
+  Globe2,
   TrendingUp,
   Wallet,
   Briefcase,
@@ -69,6 +70,7 @@ export function UserLayout({ children }: UserLayoutProps) {
     // WORKSPACE group
     { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard, group: 'workspace' },
     { name: 'Trading', href: '/dashboard/trading', icon: TrendingUp, group: 'workspace' },
+    { name: 'Markets', href: '/dashboard/markets', icon: Globe2, group: 'workspace' },
     { name: 'Wallet & Deposits', href: '/dashboard/wallet', icon: Wallet, group: 'workspace' },
     { name: 'Trading Accounts', href: '/dashboard/accounts', icon: Briefcase, group: 'workspace' },
     { name: 'Challenges', href: '/dashboard/challenges', icon: Target, group: 'workspace' },
@@ -412,4 +414,3 @@ export function UserLayout({ children }: UserLayoutProps) {
     </div>
   );
 }
-

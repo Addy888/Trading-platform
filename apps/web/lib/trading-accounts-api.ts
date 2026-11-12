@@ -10,6 +10,7 @@ export interface TradingAccount {
   initialBalance: string;
   currentBalance: string;
   equity: string;
+  isTestAccount?: boolean;
   executionMode?: string;
   stage?: string;
   status: 'PENDING' | 'ACTIVE' | 'PASSED' | 'BREACHED' | 'SUSPENDED' | 'CLOSED';

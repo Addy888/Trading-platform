@@ -382,51 +382,38 @@ export class MarginService {
 
   private quoteUnavailable(symbol: string): ServiceUnavailableException {
     const status = this.marketData.getProviderStatus();
-    const provider = status.providers.OANDA;
+    const provider = status.providers.TWELVE_DATA;
     const blockers: string[] = [];
     const quoteCategory = provider.quoteErrorCategory;
     const candleCategory = provider.candleErrorCategory;
     let category = candleCategory === 'INVALID_CREDENTIALS'
       ? candleCategory
       : quoteCategory || 'QUOTE_UNAVAILABLE';
-    if (!status.configuration.accountIdConfigured && category === 'QUOTE_UNAVAILABLE') {
-      category = 'ACCOUNT_ID_REQUIRED';
-    }
-
     if (category === 'INVALID_CREDENTIALS') {
-      blockers.push(`OANDA rejected the token for the ${status.configuration.environment} environment`);
-    } else if (category === 'ACCOUNT_ACCESS') {
-      blockers.push('OANDA denied access to the configured OANDA account');
-    } else if (category === 'ACCOUNT_ID_REQUIRED') {
-      blockers.push('OANDA_ACCOUNT_ID is not configured for account-specific pricing');
+      blockers.push('Twelve Data rejected the backend API key');
     } else if (category === 'RATE_LIMITED') {
-      blockers.push('OANDA rate limited account-specific pricing');
+      blockers.push('Twelve Data rate limited pricing');
     } else if (category === 'NETWORK') {
-      blockers.push('the backend could not reach the selected OANDA environment');
+      blockers.push('the backend could not reach Twelve Data');
     } else if (category === 'INSTRUMENT_UNAVAILABLE') {
-      blockers.push(`OANDA does not provide ${symbol} for the configured account`);
+      blockers.push(`Twelve Data does not provide ${symbol}`);
     } else if (category === 'PROVIDER') {
-      blockers.push('OANDA returned an unusable account-pricing response');
+      blockers.push('Twelve Data does not provide executable bid/ask pricing');
     } else if (category === 'NOT_CONFIGURED' || category === 'DISABLED') {
-      blockers.push('OANDA_API_TOKEN is not configured in the backend environment');
-    }
-    if (!status.configuration.accountIdConfigured) {
-      if (category !== 'ACCOUNT_ID_REQUIRED') {
-        blockers.push('OANDA_ACCOUNT_ID is not configured for account-specific pricing');
-      }
+      blockers.push('TWELVE_DATA_API_KEY is not configured in the backend environment');
     }
     if (!blockers.length) {
-      blockers.push('a fresh OANDA bid/ask quote is not available');
+      blockers.push('a fresh executable bid/ask quote is not available');
     }
     const retryable = ['QUOTE_UNAVAILABLE', 'NETWORK', 'RATE_LIMITED', 'PROVIDER'].includes(category);
     return new ServiceUnavailableException({
       statusCode: 503,
       error: 'Service Unavailable',
-      code: 'OANDA_QUOTE_UNAVAILABLE',
-      provider: 'OANDA',
+      code: 'TWELVE_DATA_QUOTE_UNAVAILABLE',
+      provider: 'TWELVE_DATA',
       category,
       retryable,
-      message: `A fresh OANDA quote is unavailable for ${symbol}; margin and P&L cannot be valued because ${blockers.join(' and ')}. Configure the correct OANDA credentials and account for this environment; the application trading-account ID is not an OANDA account ID.`,
+      message: `An executable quote is unavailable for ${symbol}; margin and P&L cannot be valued because ${blockers.join(' and ')}. A displayed Twelve Data price is not evidence of an order fill.`,
     });
   }
 

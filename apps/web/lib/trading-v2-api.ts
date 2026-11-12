@@ -2,13 +2,18 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/a
 
 async function handleResponse(response: Response) {
   if (!response.ok) {
-    let errorData: any;
+    let errorData: unknown;
     try {
       errorData = await response.json();
     } catch {
       throw new Error('An error occurred');
     }
-    throw new Error(errorData.message || errorData.error || 'An error occurred');
+    if (typeof errorData === 'object' && errorData !== null) {
+      const body = errorData as Record<string, unknown>;
+      if (typeof body.message === 'string') throw new Error(body.message);
+      if (typeof body.error === 'string') throw new Error(body.error);
+    }
+    throw new Error('An error occurred');
   }
   return response.json();
 }
@@ -74,6 +79,9 @@ export interface TradeResponse {
     realizedPnl?: string;
     openedAt: Date;
     closedAt?: Date;
+    executionMode?: 'SIMULATED' | 'PAPER' | 'BROKER_SANDBOX' | 'LIVE';
+    fillPolicy?: string;
+    providerTimestamp?: string;
   };
 }
 

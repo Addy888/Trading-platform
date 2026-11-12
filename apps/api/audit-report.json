@@ -1,0 +1,294 @@
+{
+  "timestamp": "2026-11-01T09:20:44.754Z",
+  "symbol": "EUR/USD",
+  "interval": "1m",
+  "rawProviderRequest": {
+    "url": "https://api.twelvedata.com/time_series?symbol=EUR%2FUSD&interval=1min&outputsize=10&timezone=UTC&order=ASC&apikey=***REDACTED***",
+    "method": "GET",
+    "queryParams": {
+      "symbol": "EUR/USD",
+      "interval": "1min",
+      "outputsize": "10",
+      "timezone": "UTC",
+      "order": "ASC",
+      "apikey": "***REDACTED***"
+    },
+    "headers": {
+      "Accept": "application/json"
+    }
+  },
+  "rawProviderResponse": {
+    "httpStatus": 200,
+    "statusText": "OK",
+    "headers": {
+      "access-control-allow-credentials": "true",
+      "access-control-allow-headers": "Content-Type, Accept-Encoding, Authorization, Accept, Origin, X-Requested-With, X-CSRF-TOKEN",
+      "access-control-allow-methods": "GET, OPTIONS",
+      "access-control-allow-origin": "*",
+      "api-credits-left": "6",
+      "api-credits-request": "1",
+      "api-credits-used": "2",
+      "api-source-node": "T",
+      "cf-cache-status": "DYNAMIC",
+      "cf-ray": "a539d3572d70f4b7-BOM",
+      "connection": "keep-alive",
+      "content-encoding": "gzip",
+      "content-type": "application/json; charset=utf-8",
+      "date": "Sun, 01 Nov 2026 09:20:47 GMT",
+      "nel": "{\"report_to\":\"cf-nel\",\"success_fraction\":0.0,\"max_age\":604800}",
+      "report-to": "{\"group\":\"cf-nel\",\"max_age\":604800,\"endpoints\":[{\"url\":\"https://a.nel.cloudflare.com/report/v4?s=AmLDa9Vax7HN0aKQKNBpaEo0LS52KJu2TWtNCP42ufoHFCpLOjmvq9NKOfROSGpqAD5HREXlSKEYEUcT0tQdUDzZnFKKxC16yXdj4u5BbwtoY86Y2%2BzgFCoRLlT%2FM2mAW3jP4w%3D%3D\"}]}",
+      "server": "cloudflare",
+      "transfer-encoding": "chunked",
+      "vary": "Accept-Encoding"
+    },
+    "bodySize": 1169,
+    "responseTime": 486,
+    "body": {
+      "meta": {
+        "symbol": "EUR/USD",
+        "interval": "1min",
+        "currency_base": "Euro",
+        "currency_quote": "US Dollar",
+        "type": "Physical Currency"
+      },
+      "values": [
+        {
+          "datetime": "2026-11-01 09:10:00",
+          "open": "1.11998",
+          "high": "1.12001",
+          "low": "1.11997",
+          "close": "1.12001"
+        },
+        {
+          "datetime": "2026-11-01 09:11:00",
+          "open": "1.11998",
+          "high": "1.12003",
+          "low": "1.11998",
+          "close": "1.11998"
+        },
+        {
+          "datetime": "2026-11-01 09:12:00",
+          "open": "1.11998",
+          "high": "1.12001",
+          "low": "1.11997",
+          "close": "1.12001"
+        },
+        {
+          "datetime": "2026-11-01 09:13:00",
+          "open": "1.11998",
+          "high": "1.12003",
+          "low": "1.11998",
+          "close": "1.11998"
+        },
+        {
+          "datetime": "2026-11-01 09:14:00",
+          "open": "1.11998",
+          "high": "1.12",
+          "low": "1.11997",
+          "close": "1.12"
+        },
+        {
+          "datetime": "2026-11-01 09:15:00",
+          "open": "1.11998",
+          "high": "1.12002",
+          "low": "1.11998",
+          "close": "1.12001"
+        },
+        {
+          "datetime": "2026-11-01 09:16:00",
+          "open": "1.11998",
+          "high": "1.11999",
+          "low": "1.11998",
+          "close": "1.11999"
+        },
+        {
+          "datetime": "2026-11-01 09:17:00",
+          "open": "1.11998",
+          "high": "1.12",
+          "low": "1.11998",
+          "close": "1.12"
+        },
+        {
+          "datetime": "2026-11-01 09:18:00",
+          "open": "1.11998",
+          "high": "1.12001",
+          "low": "1.11998",
+          "close": "1.11998"
+        },
+        {
+          "datetime": "2026-11-01 09:19:00",
+          "open": "1.11998",
+          "high": "1.12001",
+          "low": "1.11998",
+          "close": "1.12001"
+        }
+      ],
+      "status": "ok"
+    }
+  },
+  "normalizedCandles": [
+    {
+      "timestamp": "2026-11-01 09:10:00",
+      "open": "1.11998",
+      "high": "1.12001",
+      "low": "1.11997",
+      "close": "1.12001"
+    },
+    {
+      "timestamp": "2026-11-01 09:11:00",
+      "open": "1.11998",
+      "high": "1.12003",
+      "low": "1.11998",
+      "close": "1.11998"
+    },
+    {
+      "timestamp": "2026-11-01 09:12:00",
+      "open": "1.11998",
+      "high": "1.12001",
+      "low": "1.11997",
+      "close": "1.12001"
+    },
+    {
+      "timestamp": "2026-11-01 09:13:00",
+      "open": "1.11998",
+      "high": "1.12003",
+      "low": "1.11998",
+      "close": "1.11998"
+    },
+    {
+      "timestamp": "2026-11-01 09:14:00",
+      "open": "1.11998",
+      "high": "1.12",
+      "low": "1.11997",
+      "close": "1.12"
+    },
+    {
+      "timestamp": "2026-11-01 09:15:00",
+      "open": "1.11998",
+      "high": "1.12002",
+      "low": "1.11998",
+      "close": "1.12001"
+    },
+    {
+      "timestamp": "2026-11-01 09:16:00",
+      "open": "1.11998",
+      "high": "1.11999",
+      "low": "1.11998",
+      "close": "1.11999"
+    },
+    {
+      "timestamp": "2026-11-01 09:17:00",
+      "open": "1.11998",
+      "high": "1.12",
+      "low": "1.11998",
+      "close": "1.12"
+    },
+    {
+      "timestamp": "2026-11-01 09:18:00",
+      "open": "1.11998",
+      "high": "1.12001",
+      "low": "1.11998",
+      "close": "1.11998"
+    },
+    {
+      "timestamp": "2026-11-01 09:19:00",
+      "open": "1.11998",
+      "high": "1.12001",
+      "low": "1.11998",
+      "close": "1.12001"
+    }
+  ],
+  "validation": {
+    "totalCandles": 10,
+    "validCandles": 10,
+    "invalidCandles": 0,
+    "issues": []
+  },
+  "chartInput": [
+    {
+      "time": 1793504400,
+      "open": 1.11998,
+      "high": 1.12001,
+      "low": 1.11997,
+      "close": 1.12001
+    },
+    {
+      "time": 1793504460,
+      "open": 1.11998,
+      "high": 1.12003,
+      "low": 1.11998,
+      "close": 1.11998
+    },
+    {
+      "time": 1793504520,
+      "open": 1.11998,
+      "high": 1.12001,
+      "low": 1.11997,
+      "close": 1.12001
+    },
+    {
+      "time": 1793504580,
+      "open": 1.11998,
+      "high": 1.12003,
+      "low": 1.11998,
+      "close": 1.11998
+    },
+    {
+      "time": 1793504640,
+      "open": 1.11998,
+      "high": 1.12,
+      "low": 1.11997,
+      "close": 1.12
+    },
+    {
+      "time": 1793504700,
+      "open": 1.11998,
+      "high": 1.12002,
+      "low": 1.11998,
+      "close": 1.12001
+    },
+    {
+      "time": 1793504760,
+      "open": 1.11998,
+      "high": 1.11999,
+      "low": 1.11998,
+      "close": 1.11999
+    },
+    {
+      "time": 1793504820,
+      "open": 1.11998,
+      "high": 1.12,
+      "low": 1.11998,
+      "close": 1.12
+    },
+    {
+      "time": 1793504880,
+      "open": 1.11998,
+      "high": 1.12001,
+      "low": 1.11998,
+      "close": 1.11998
+    },
+    {
+      "time": 1793504940,
+      "open": 1.11998,
+      "high": 1.12001,
+      "low": 1.11998,
+      "close": 1.12001
+    }
+  ],
+  "analysis": {
+    "isProviderResponseValid": true,
+    "hasValidCandles": true,
+    "isDataStale": true,
+    "intervalMatches": true,
+    "timestampsChronological": true,
+    "noDuplicates": true,
+    "allOHLCValid": true,
+    "issues": [
+      "Data is 331 minutes old (stale)"
+    ],
+    "recommendations": [
+      "Review identified issues above"
+    ]
+  }
+}

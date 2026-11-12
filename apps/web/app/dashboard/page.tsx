@@ -95,7 +95,7 @@ export default function DashboardPage() {
       setMarginInfo(info);
     } catch (err: any) {
       setMarginInfo(null);
-      setMarginError('Margin details require fresh live quotes from OANDA.');
+      setMarginError('Margin details require fresh executable bid/ask quotes. The configured Twelve Data feed is display-only.');
     }
   };
 

@@ -25,6 +25,7 @@ export interface TradingAccount {
   initialBalance: string;
   currentBalance: string;
   equity: string;
+  isTestAccount?: boolean;
   status: string;
   stage?: string;
   executionMode?: string;
@@ -130,6 +131,10 @@ export interface ChallengeProgress {
 }
 
 export const tradingApi = {
+  async getTestFundingStatus(token: string): Promise<{ enabled: boolean; initialBalance: string | null; currency: string | null; label: string | null }> {
+    const response = await authenticatedFetch(`${API_BASE_URL}/trading-accounts/test-funding`, token);
+    return handleResponse(response);
+  },
   /**
    * Get user's trading accounts
    */
@@ -147,7 +152,7 @@ export const tradingApi = {
    */
   async createTradingAccount(
     token: string,
-    data?: { initialFundingAmount?: string | number },
+    data?: { initialFundingAmount?: string | number; testFunding?: boolean },
   ): Promise<TradingAccount> {
     const response = await authenticatedFetch(`${API_BASE_URL}/trading-accounts`, token, {
       method: 'POST',

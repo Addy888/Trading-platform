@@ -348,6 +348,9 @@ model WalletLedger {
 model TradingAccount {
   id              String @id @default(uuid())
   userId          String
+  isTestAccount   Boolean @default(false)
+  // Nullable unique owner marker guarantees at most one simulated test-funded account per user.
+  testFundingUserId String? @unique
   challengePlanId String?
   orderId         String? @unique
   ruleSetId       String

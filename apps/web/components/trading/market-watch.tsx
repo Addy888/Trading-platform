@@ -1,23 +1,31 @@
 'use client';
 
+import type { MarketInstrument } from '@/lib/market-api';
+
 interface MarketWatchProps {
   symbols: string[];
-  quotes: Record<string, { bid: string; ask: string; spread: string; price?: string }>;
+  quotes: Record<string, { price: string; timestamp: string; fetchedAt: string | null; receivedAt: string }>;
+  instruments?: Record<string, MarketInstrument>;
   selectedSymbol: string;
   onSymbolSelect: (symbol: string) => void;
   loading?: boolean;
-  dataSource?: 'OANDA';
+  dataSource?: 'TWELVE_DATA';
   unavailableMessage?: string | null;
+  staleThresholdMs?: number;
+  currentTimeMs?: number | null;
 }
 
 export function MarketWatch({ 
   symbols, 
   quotes, 
+  instruments = {},
   selectedSymbol, 
   onSymbolSelect,
   loading = false,
   dataSource,
   unavailableMessage,
+  staleThresholdMs = 20 * 60_000,
+  currentTimeMs = null,
 }: MarketWatchProps) {
   const formatPrice = (price: string, decimals: number = 5) => {
     const num = parseFloat(price);
@@ -50,7 +58,7 @@ export function MarketWatch({
       
       {dataSource && (
         <div className="mb-3 px-2 py-1 bg-gray-800 rounded text-xs text-gray-400 text-center">
-          Source: {dataSource}
+          Source: {dataSource} · display-only prices
         </div>
       )}
       {unavailableMessage && (
@@ -62,11 +70,12 @@ export function MarketWatch({
       <div className="space-y-1">
         {symbols.map((symbol) => {
           const quote = quotes[symbol];
-          const bid = quote?.bid || '';
-          const ask = quote?.ask || '';
-          const spread = quote?.spread || '';
+          const instrument = instruments[symbol];
           const isSelected = symbol === selectedSymbol;
           const decimals = getDecimals(symbol);
+          const timestamp = quote ? Date.parse(quote.timestamp) : Number.NaN;
+          const ageMs = currentTimeMs === null ? Number.NaN : timestamp - currentTimeMs;
+          const isFresh = Number.isFinite(ageMs) && ageMs <= 0 && ageMs >= -staleThresholdMs;
 
           return (
             <button
@@ -78,25 +87,42 @@ export function MarketWatch({
                   : 'bg-gray-800 hover:bg-gray-750 border-gray-700'
               }`}
             >
-              <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center justify-between mb-1">
                 <span className="font-semibold text-sm">{symbol}</span>
-                <span className="text-xs text-gray-400">
-                  {Number.isFinite(Number(spread)) && spread ? Number(spread).toFixed(decimals > 3 ? 1 : decimals) : '—'}
+                <span
+                  className="text-[10px] text-gray-400"
+                  title={quote ? `Provider quote time: ${new Date(timestamp).toISOString()}\nServer fetched: ${quote.fetchedAt || 'unavailable'}\nApp received: ${quote.receivedAt}` : undefined}
+                >
+                  {Number.isFinite(timestamp)
+                    ? new Date(timestamp).toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' })
+                    : 'No quote'}
                 </span>
               </div>
-              <div className="grid grid-cols-2 gap-2 text-xs">
-                <div>
-                  <div className="text-gray-400 mb-1">BID</div>
-                  <div className="font-mono text-red-400 font-semibold">
-                    {formatPrice(bid, decimals)}
-                  </div>
+              <div className="mb-1 text-[11px] text-gray-300">
+                {instrument?.name || 'Instrument name unavailable'}
+              </div>
+              <div className="mb-2 flex flex-wrap gap-x-2 text-[10px] text-gray-500">
+                <span>{instrument?.assetType || 'Category unavailable'}</span>
+                {instrument?.exchange && <span>{instrument.exchange}</span>}
+                {instrument?.country && <span>{instrument.country}</span>}
+                {instrument?.currency && <span>Quote {instrument.currency}</span>}
+              </div>
+              <div className="flex items-baseline justify-between gap-2">
+                <span className="text-[10px] uppercase text-gray-400">Last · display-only</span>
+                <div className="font-mono text-white font-semibold text-sm">
+                  {formatPrice(quote?.price || '', decimals)}
                 </div>
-                <div>
-                  <div className="text-gray-400 mb-1">ASK</div>
-                  <div className="font-mono text-green-400 font-semibold">
-                    {formatPrice(ask, decimals)}
-                  </div>
-                </div>
+              </div>
+              <div className="mt-1 text-right text-[10px] text-gray-500">
+                {Number.isFinite(timestamp)
+                  ? !Number.isFinite(ageMs)
+                    ? 'Checking provider timestamp'
+                    : isFresh
+                    ? `Provider update ${new Date(timestamp).toLocaleTimeString()}`
+                    : ageMs > 0
+                      ? 'Invalid future provider timestamp'
+                      : 'Stale provider timestamp'
+                  : 'Provider update unavailable'}
               </div>
             </button>
           );

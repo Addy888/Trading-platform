@@ -4,12 +4,16 @@ import { PrismaService } from '../prisma/prisma.service';
 import { MarketDataEngineService, MarketStatus } from '../market-data/market-data-engine.service';
 import { InstrumentConfigService } from '../market-data/instrument-config.service';
 import { MarginService } from './margin.service';
+import { BalanceEquityService } from './balance-equity.service';
 import { RuleEvaluatorService } from '../rule-evaluator/rule-evaluator.service';
+import { RiskEvaluationService } from '../risk-engine/risk-evaluation.service';
+import { MinTradingDaysService } from '../risk-engine/min-trading-days.service';
 import { AccountSnapshotsService } from '../account-snapshots/account-snapshots.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { MarketDataManagerService } from '../market-data/market-data-manager.service';
 import { TradingAccountStatus, TradeSide, TradeStatus } from '@prisma/client';
 import Decimal from 'decimal.js';
-import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 
 describe('TradingEngineV2Service', () => {
   let service: TradingEngineV2Service;
@@ -42,6 +46,14 @@ describe('TradingEngineV2Service', () => {
     realizedPnl: new Decimal(0),
     openedAt: new Date(),
     closedAt: null,
+  };
+  const simulatedAccount = {
+    ...mockAccount,
+    executionMode: 'SIMULATED',
+    highWaterMark: new Decimal(100000),
+    dailyStartEquity: new Decimal(100000),
+    dailyStartBalance: new Decimal(100000),
+    trades: [],
   };
 
   beforeEach(async () => {
@@ -100,6 +112,32 @@ describe('TradingEngineV2Service', () => {
               requiredMargin: '1085',
               freeMargin: '98915',
             }),
+            calculateRequiredMargin: jest.fn().mockReturnValue({
+              requiredMargin: new Decimal(1085),
+              notionalValue: new Decimal(108500),
+              leverage: 100,
+              effectiveLeverage: 100,
+              contractMultiplier: 100000,
+            }),
+          },
+        },
+        {
+          provide: BalanceEquityService,
+          useValue: {
+            calculatePositionRealizedPnl: jest.fn().mockReturnValue(new Decimal(500)),
+            updateFinancialStateOnPriceChange: jest.fn().mockResolvedValue({
+              equity: new Decimal(100000),
+              hwmUpdated: false,
+              hwm: new Decimal(100000),
+            }),
+            calculateTotalRealizedPnl: jest.fn().mockResolvedValue(new Decimal(0)),
+            calculateTotalUnrealizedPnl: jest.fn().mockResolvedValue(new Decimal(0)),
+            updateFinancialStateOnClose: jest.fn().mockResolvedValue({
+              balance: new Decimal(100000),
+              equity: new Decimal(100000),
+              hwmUpdated: false,
+              hwm: new Decimal(100000),
+            }),
           },
         },
         {
@@ -113,9 +151,32 @@ describe('TradingEngineV2Service', () => {
           },
         },
         {
+          provide: RiskEvaluationService,
+          useValue: {
+            evaluateAccount: jest.fn().mockResolvedValue({}),
+            emitPostEvaluationEvents: jest.fn(),
+          },
+        },
+        {
+          provide: MinTradingDaysService,
+          useValue: { recordTradingDay: jest.fn().mockResolvedValue(undefined) },
+        },
+        {
           provide: AccountSnapshotsService,
           useValue: {
             createSnapshot: jest.fn().mockResolvedValue(undefined),
+          },
+        },
+        {
+          provide: MarketDataManagerService,
+          useValue: {
+            getProviderStatus: jest.fn().mockReturnValue({
+              configuration: { staleThresholdMs: 20 * 60_000 },
+            }),
+            getQuote: jest.fn().mockResolvedValue({
+              price: '1.0851',
+              timestamp: new Date().toISOString(),
+            }),
           },
         },
         {
@@ -135,6 +196,81 @@ describe('TradingEngineV2Service', () => {
   });
 
   describe('openTrade', () => {
+    it.each([TradeSide.BUY, TradeSide.SELL])(
+      'opens a simulated %s order using only a fresh provider last price',
+      async (side) => {
+      const openedTrade = {
+        ...mockTrade,
+        side,
+        entryPrice: new Decimal(1.0851),
+        openedAt: new Date(),
+      };
+      (prismaService.tradingAccount.findUnique as jest.Mock).mockResolvedValue(simulatedAccount);
+      (prismaService.$transaction as jest.Mock).mockImplementation(async (callback) => {
+        const tx = {
+          tradingAccount: {
+            findUnique: jest.fn().mockResolvedValue(simulatedAccount),
+            update: jest.fn().mockResolvedValue(simulatedAccount),
+          },
+          trade: {
+            create: jest.fn().mockResolvedValue(openedTrade),
+            update: jest.fn().mockResolvedValue(openedTrade),
+            findMany: jest.fn().mockResolvedValue([]),
+          },
+          auditLog: { create: jest.fn().mockResolvedValue({}) },
+        };
+        return callback(tx);
+      });
+
+      const result = await service.openTrade('account-1', 'user-1', {
+        symbol: 'EURUSD',
+        side,
+        volume: 0.01,
+      });
+
+      expect('executionMode' in result && result.executionMode).toBe('SIMULATED');
+      expect('fillPolicy' in result && result.fillPolicy).toBe('TWELVE_DATA_LAST_PRICE_NO_SPREAD');
+      expect(result.entryPrice).toEqual(new Decimal(1.0851));
+      expect(prismaService.$transaction).toHaveBeenCalled();
+      },
+    );
+
+    it('rejects simulated execution when the provider timestamp is stale', async () => {
+      (prismaService.tradingAccount.findUnique as jest.Mock).mockResolvedValue(simulatedAccount);
+      const marketManager = service['providerMarketData'] as jest.Mocked<MarketDataManagerService>;
+      marketManager.getQuote.mockResolvedValue({
+        symbol: 'EURUSD',
+        price: '1.0851',
+        close: '1.0851',
+        change: undefined,
+        percentChange: undefined,
+        timestamp: new Date(Date.now() - 30 * 60_000).toISOString(),
+        fetchedAt: new Date().toISOString(),
+        provider: 'TWELVE_DATA',
+      });
+
+      await expect(service.openTrade('account-1', 'user-1', {
+        symbol: 'EURUSD',
+        side: TradeSide.BUY,
+        volume: 0.01,
+      })).rejects.toThrow(ServiceUnavailableException);
+      expect(prismaService.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('keeps real execution disabled without broker quotes', async () => {
+      (prismaService.tradingAccount.findUnique as jest.Mock).mockResolvedValue({
+        ...simulatedAccount,
+        executionMode: 'LIVE',
+      });
+
+      await expect(service.openTrade('account-1', 'user-1', {
+        symbol: 'EURUSD',
+        side: TradeSide.BUY,
+        volume: 0.01,
+      })).rejects.toThrow(BadRequestException);
+      expect(prismaService.$transaction).not.toHaveBeenCalled();
+    });
+
     it('should successfully open a BUY trade', async () => {
       // Mock transaction
       (prismaService.$transaction as jest.Mock).mockImplementation(async (callback) => {
@@ -343,6 +479,50 @@ describe('TradingEngineV2Service', () => {
   });
 
   describe('closeTrade', () => {
+    it('closes a simulated position with a fresh last price and records simulated P&L', async () => {
+      const openPositionAccount = { ...simulatedAccount, trades: [mockTrade] };
+      const closedTrade = {
+        ...mockTrade,
+        status: TradeStatus.CLOSED,
+        exitPrice: new Decimal(1.095),
+        realizedPnl: new Decimal(1000),
+        unrealizedPnl: new Decimal(0),
+        closedAt: new Date(),
+      };
+      (prismaService.tradingAccount.findUnique as jest.Mock).mockResolvedValue(openPositionAccount);
+      const marketManager = service['providerMarketData'] as jest.Mocked<MarketDataManagerService>;
+      marketManager.getQuote.mockResolvedValue({
+        symbol: 'EURUSD',
+        price: '1.095',
+        close: '1.095',
+        change: undefined,
+        percentChange: undefined,
+        timestamp: new Date().toISOString(),
+        fetchedAt: new Date().toISOString(),
+        provider: 'TWELVE_DATA',
+      });
+      (prismaService.$transaction as jest.Mock).mockImplementation(async (callback) => {
+        const tx = {
+          tradingAccount: {
+            findUnique: jest.fn().mockResolvedValue(openPositionAccount),
+            update: jest.fn().mockResolvedValue({ ...openPositionAccount, currentBalance: new Decimal(101000) }),
+          },
+          trade: {
+            update: jest.fn().mockResolvedValue(closedTrade),
+            findMany: jest.fn().mockResolvedValue([{ realizedPnl: new Decimal(1000) }]),
+          },
+          auditLog: { create: jest.fn().mockResolvedValue({}) },
+        };
+        return callback(tx);
+      });
+
+      const result = await service.closeTrade('account-1', 'trade-1', 'user-1');
+
+      expect(result.status).toBe(TradeStatus.CLOSED);
+      expect('executionMode' in result && result.executionMode).toBe('SIMULATED');
+      expect('fillPolicy' in result && result.fillPolicy).toBe('TWELVE_DATA_LAST_PRICE_NO_SPREAD');
+    });
+
     it('should successfully close a BUY trade at BID price', async () => {
       const bidPrice = new Decimal(1.0900);
       jest.spyOn(marketDataService, 'getBid').mockReturnValue(bidPrice);

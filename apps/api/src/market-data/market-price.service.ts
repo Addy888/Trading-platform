@@ -11,7 +11,7 @@ export class MarketPriceService {
     const price = this.getAvailableMidPrice(symbol);
     if (price) return price;
     throw new ServiceUnavailableException(
-      'OANDA market data is temporarily unavailable. Please retry later.',
+      'Executable bid/ask market data is unavailable. Twelve Data display prices do not enable order execution.',
     );
   }
 
@@ -30,7 +30,7 @@ export class MarketPriceService {
   getEntryPrice(symbol: string, side: TradeSide): Decimal {
     if (!this.marketData.isMarketAvailable(symbol)) {
       throw new ServiceUnavailableException(
-        'A fresh OANDA bid/ask quote is required to open a position.',
+        'A fresh executable bid/ask quote is required to open a position.',
       );
     }
     const price = side === TradeSide.BUY
@@ -38,7 +38,7 @@ export class MarketPriceService {
       : this.marketData.getBid(symbol);
     if (!price) {
       throw new ServiceUnavailableException(
-        'A fresh OANDA bid/ask quote is required to open a position.',
+        'A fresh executable bid/ask quote is required to open a position.',
       );
     }
     return price;
@@ -48,7 +48,7 @@ export class MarketPriceService {
     const price = this.getAvailableExitPrice(symbol, side);
     if (!price) {
       throw new ServiceUnavailableException(
-        'A fresh OANDA bid/ask quote is required to value or close a position.',
+        'A fresh executable bid/ask quote is required to value or close a position.',
       );
     }
     return price;
@@ -63,6 +63,6 @@ export class MarketPriceService {
   }
 
   getPriceSource(): string {
-    return 'OANDA';
+    return 'TWELVE_DATA';
   }
 }

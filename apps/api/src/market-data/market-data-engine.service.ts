@@ -10,7 +10,7 @@ export interface MarketTick {
   last: Decimal;
   spread: Decimal;
   timestamp: Date;
-  source: 'OANDA';
+  source: 'TWELVE_DATA';
 }
 
 export enum MarketStatus {
@@ -38,11 +38,10 @@ export class MarketDataEngineService implements OnModuleInit, OnModuleDestroy {
 
   async onModuleInit(): Promise<void> {
     const status = this.marketData.getProviderStatus();
-    if (!status.configuration.accountSpecificPricingAvailable ||
-        ['INVALID_CREDENTIALS', 'DISABLED', 'ACCOUNT_ID_REQUIRED'].includes(
-          status.providers.OANDA.quoteStatus,
-        )) return;
-    await this.refreshQuotes();
+    // Twelve Data's quote endpoint supplies a last price, not executable bid/ask.
+    // Never convert it into a fill price; execution remains unavailable until a
+    // licensed bid/ask provider is explicitly integrated.
+    return;
   }
 
   onModuleDestroy(): void {
@@ -76,57 +75,35 @@ export class MarketDataEngineService implements OnModuleInit, OnModuleDestroy {
   private async refreshQuotes(): Promise<void> {
     if (this.polling) return;
     const status = this.marketData.getProviderStatus();
-    if (!status.configuration.accountSpecificPricingAvailable ||
-        ['INVALID_CREDENTIALS', 'DISABLED', 'ACCOUNT_ID_REQUIRED', 'ACCOUNT_ACCESS_DENIED'].includes(
-          status.providers.OANDA.quoteStatus,
-        )) return;
+    if (['INVALID_CREDENTIALS', 'DISABLED'].includes(status.providers.TWELVE_DATA.quoteStatus)) return;
     this.polling = true;
     const updates: MarketTick[] = [];
     let hadFailure = false;
     try {
       for (const symbol of this.symbols) {
         try {
-          const quote = await this.marketData.getQuote(symbol);
-          const bid = new Decimal(quote.bid);
-          const ask = new Decimal(quote.ask);
-          if (!bid.isFinite() || !ask.isFinite() || bid.lte(0) || ask.lt(bid)) {
-            throw new Error(`OANDA returned an invalid bid/ask quote for ${symbol}.`);
-          }
-          const tick: MarketTick = {
-            symbol,
-            bid,
-            ask,
-            last: bid.plus(ask).dividedBy(2),
-            spread: ask.minus(bid),
-            timestamp: new Date(quote.timestamp),
-            source: 'OANDA',
-          };
-          if (Number.isNaN(tick.timestamp.getTime())) {
-            throw new Error(`OANDA returned an invalid quote timestamp for ${symbol}.`);
-          }
-          this.ticks.set(symbol, tick);
-          updates.push(tick);
+          await this.marketData.getQuote(symbol);
+          // Do not manufacture bid/ask from a Twelve Data last price.
+          throw new Error(`Twelve Data provides a display price for ${symbol}, not an executable bid/ask quote.`);
         } catch (error) {
           hadFailure = true;
           this.ticks.delete(this.normalize(symbol));
-          this.logger.warn(`OANDA quote unavailable for ${symbol}; no market-price fallback will be used.`);
-          const quoteStatus = this.marketData.getProviderStatus().providers.OANDA.quoteStatus;
+          this.logger.warn(`Twelve Data executable quote unavailable for ${symbol}; no market-price fallback will be used.`);
+          const quoteStatus = this.marketData.getProviderStatus().providers.TWELVE_DATA.quoteStatus;
           if ([
             'INVALID_CREDENTIALS',
-            'ACCOUNT_ACCESS_DENIED',
-            'ACCOUNT_ID_REQUIRED',
             'DISABLED',
           ].includes(quoteStatus)) break;
         }
       }
       if (updates.length) {
-        this.eventEmitter.emit('market.tick', { ticks: updates, timestamp: new Date(), source: 'OANDA' });
+        this.eventEmitter.emit('market.tick', { ticks: updates, timestamp: new Date(), source: 'TWELVE_DATA' });
       }
     } finally {
       this.polling = false;
-      const quoteStatus = this.marketData.getProviderStatus().providers.OANDA.quoteStatus;
-      if (!['INVALID_CREDENTIALS', 'ACCOUNT_ACCESS_DENIED', 'DISABLED', 'ACCOUNT_ID_REQUIRED'].includes(quoteStatus)) {
-        const serverRetryAfter = this.marketData.getProviderStatus().providers.OANDA.retryAfter;
+      const quoteStatus = this.marketData.getProviderStatus().providers.TWELVE_DATA.quoteStatus;
+      if (!['INVALID_CREDENTIALS', 'DISABLED'].includes(quoteStatus)) {
+        const serverRetryAfter = this.marketData.getProviderStatus().providers.TWELVE_DATA.retryAfter;
         this.retryDelayMs = hadFailure
           ? Math.max(
               Math.min(Math.max(this.pollIntervalMs, this.retryDelayMs * 2), this.maxRetryDelayMs),

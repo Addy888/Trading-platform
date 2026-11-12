@@ -13,15 +13,17 @@ interface Position {
   stopLoss?: string;
   takeProfit?: string;
   openedAt: string;
+  priceSource?: string | null;
 }
 
 interface PositionsTableProps {
   positions: Position[];
+  simulated?: boolean;
   onClose: (positionId: string) => void;
   onModify: (positionId: string, sl?: number, tp?: number) => void;
 }
 
-export function PositionsTable({ positions, onClose, onModify }: PositionsTableProps) {
+export function PositionsTable({ positions, simulated = false, onClose, onModify }: PositionsTableProps) {
   const [modifyingId, setModifyingId] = useState<string | null>(null);
   const [modifySL, setModifySL] = useState('');
   const [modifyTP, setModifyTP] = useState('');
@@ -54,7 +56,7 @@ export function PositionsTable({ positions, onClose, onModify }: PositionsTableP
             <th className="px-4 py-2 text-right">Volume</th>
             <th className="px-4 py-2 text-right">Entry Price</th>
             <th className="px-4 py-2 text-right">Current Price</th>
-            <th className="px-4 py-2 text-right">P&L</th>
+            <th className="px-4 py-2 text-right">{simulated ? 'Simulated P&L' : 'P&L'}</th>
             <th className="px-4 py-2 text-right">SL</th>
             <th className="px-4 py-2 text-right">TP</th>
             <th className="px-4 py-2 text-center">Actions</th>
@@ -86,14 +88,34 @@ export function PositionsTable({ positions, onClose, onModify }: PositionsTableP
                   {parseFloat(position.entryPrice).toFixed(5)}
                 </td>
                 <td className="px-4 py-2 text-right font-mono">
-                  {position.currentPrice === null
-                    ? 'Unavailable'
-                    : parseFloat(position.currentPrice).toFixed(5)}
+                  {position.currentPrice === null ? (
+                    <span className="text-gray-400">Unavailable</span>
+                  ) : (
+                    <span>
+                      {parseFloat(position.currentPrice).toFixed(5)}
+                      {simulated && position.priceSource?.includes('SIMULATED') && (
+                        <span className="text-xs text-gray-500 ml-1" title="Indicative price from Twelve Data last quote (not executable)">
+                          *
+                        </span>
+                      )}
+                    </span>
+                  )}
                 </td>
                 <td className={`px-4 py-2 text-right font-mono font-semibold ${
                   pnl === null ? 'text-gray-400' : pnl >= 0 ? 'text-green-400' : 'text-red-400'
                 }`}>
-                  {pnl === null ? 'Unavailable' : `${pnl >= 0 ? '+' : ''}${pnl.toFixed(2)}`}
+                  {pnl === null ? (
+                    'Unavailable'
+                  ) : (
+                    <span>
+                      {`${pnl >= 0 ? '+' : ''}${pnl.toFixed(2)}`}
+                      {simulated && position.priceSource?.includes('SIMULATED') && (
+                        <span className="text-xs text-gray-500 ml-1" title="Simulated P&L based on indicative pricing">
+                          *
+                        </span>
+                      )}
+                    </span>
+                  )}
                 </td>
                 <td className="px-4 py-2 text-right font-mono text-xs">
                   {position.stopLoss ? parseFloat(position.stopLoss).toFixed(5) : '-'}

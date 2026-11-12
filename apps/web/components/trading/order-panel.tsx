@@ -1,9 +1,10 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 
 interface OrderPanelProps {
   symbol: string;
+  instrumentName?: string;
   bid: string;
   ask: string;
   spread: string;
@@ -17,12 +18,16 @@ interface OrderPanelProps {
     stopLoss?: number;
     takeProfit?: number;
   }) => Promise<void>;
+  executionMode?: 'SIMULATED' | 'PAPER' | 'BROKER_SANDBOX' | 'LIVE';
+  simulatedPrice?: string;
+  simulatedPriceTimestamp?: string;
   disabled?: boolean;
   disabledReason?: string;
 }
 
 export function OrderPanel({
   symbol,
+  instrumentName,
   bid,
   ask,
   spread,
@@ -31,6 +36,9 @@ export function OrderPanel({
   freeMargin,
   usedMargin,
   onTrade,
+  executionMode = 'LIVE',
+  simulatedPrice,
+  simulatedPriceTimestamp,
   disabled,
   disabledReason
 }: OrderPanelProps) {
@@ -39,6 +47,7 @@ export function OrderPanel({
   const [stopLoss, setStopLoss] = useState('');
   const [takeProfit, setTakeProfit] = useState('');
   const [processing, setProcessing] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   const formatPrice = (price: string) => {
     const num = parseFloat(price);
@@ -52,6 +61,7 @@ export function OrderPanel({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setSubmitError(null);
     
     const vol = parseFloat(volume);
     if (isNaN(vol) || vol <= 0) {
@@ -85,7 +95,7 @@ export function OrderPanel({
       setStopLoss('');
       setTakeProfit('');
     } catch (err) {
-      // Error handling done by parent
+      setSubmitError(err instanceof Error ? err.message : 'Order was rejected.');
     } finally {
       setProcessing(false);
     }
@@ -109,9 +119,18 @@ export function OrderPanel({
       <form onSubmit={handleSubmit} className="space-y-4">
         {/* Symbol & Price Display */}
         <div className="bg-gray-800 rounded-lg p-3">
-          <div className="text-xs text-gray-400 mb-1">Symbol</div>
-          <div className="text-lg font-bold mb-3">{symbol}</div>
-          
+          <div className="text-xs text-gray-400 mb-1">Instrument</div>
+          <div className="text-lg font-bold">{symbol}</div>
+          <div className="mb-3 text-xs text-gray-400">{instrumentName || 'Instrument name unavailable'}</div>
+          {executionMode === 'SIMULATED' ? (
+            <div className="rounded border border-blue-700/60 bg-blue-950/30 p-2 text-xs">
+              <div className="mb-1 text-blue-200">SIMULATED INDICATIVE FILL · LAST PRICE, NO SPREAD</div>
+              <div className="font-mono text-white">{simulatedPrice ? formatPrice(simulatedPrice) : 'Unavailable'}</div>
+              <div className="mt-1 text-[10px] text-gray-400">
+                Provider time: {simulatedPriceTimestamp ? new Date(simulatedPriceTimestamp).toLocaleString() : 'unavailable'}
+              </div>
+            </div>
+          ) : (
           <div className="grid grid-cols-2 gap-3">
             <div>
               <div className="text-xs text-gray-400 mb-1">BID (Sell)</div>
@@ -126,12 +145,12 @@ export function OrderPanel({
               </div>
             </div>
           </div>
-          
+          )}
           <div className="mt-2 pt-2 border-t border-gray-700">
             <div className="flex justify-between text-xs">
               <span className="text-gray-400">Spread:</span>
               <span className="font-mono text-gray-300">
-                {Number.isFinite(Number(spread)) && spread ? Number(spread).toFixed(1) : '—'}
+                {executionMode === 'SIMULATED' ? 'Not used' : Number.isFinite(Number(spread)) && spread ? Number(spread).toFixed(1) : '—'}
               </span>
             </div>
           </div>
@@ -165,7 +184,9 @@ export function OrderPanel({
             </button>
           </div>
           <div className="mt-2 text-xs text-gray-400">
-            Execution: <span className="font-mono text-white">{formatPrice(executionPrice)}</span>
+            {executionMode === 'SIMULATED'
+              ? <>Simulated fill policy: <span className="font-mono text-white">latest provider last price</span></>
+              : <>Execution: <span className="font-mono text-white">{formatPrice(executionPrice)}</span></>}
           </div>
         </div>
 
@@ -258,12 +279,15 @@ export function OrderPanel({
             <span>Trading Disabled</span>
           ) : (
             <span className="flex items-center justify-center">
-              <span className="mr-2">{side} {volume}</span>
-              <span className="text-sm opacity-75">@ {formatPrice(executionPrice)}</span>
+              <span className="mr-2">{executionMode === 'SIMULATED' ? 'SIMULATED ' : ''}{side} {volume}</span>
+              {executionMode === 'SIMULATED'
+                ? <span className="text-sm opacity-75">@ {simulatedPrice ? formatPrice(simulatedPrice) : 'unavailable'}</span>
+                : <span className="text-sm opacity-75">@ {formatPrice(executionPrice)}</span>}
             </span>
           )}
         </button>
       </form>
+      {submitError && <div role="alert" className="mt-3 rounded border border-red-800 bg-red-950/40 p-2 text-xs text-red-200">{submitError}</div>}
     </div>
   );
 }

@@ -519,8 +519,24 @@ export class TradingEngineService {
       orderBy: { openedAt: 'desc' },
     });
 
+    // ✅ FIX: For SIMULATED accounts, use mid/last price for indicative valuation
+    // For non-simulated accounts, use executable bid/ask prices
+    const isSimulated = account.executionMode === 'SIMULATED';
+
     return openTrades.map((trade) => {
-      const currentPrice = this.marketPrice.getAvailableExitPrice(trade.symbol, trade.side);
+      let currentPrice: Decimal | null = null;
+      let priceSource: string | null = null;
+
+      if (isSimulated) {
+        // For simulated accounts, use Twelve Data last price (mid price) for indicative valuation
+        currentPrice = this.marketPrice.getAvailableMidPrice(trade.symbol);
+        priceSource = currentPrice ? 'TWELVE_DATA_LAST_PRICE_SIMULATED_ONLY' : null;
+      } else {
+        // For real accounts, require executable bid/ask quotes
+        currentPrice = this.marketPrice.getAvailableExitPrice(trade.symbol, trade.side);
+        priceSource = currentPrice ? this.marketPrice.getPriceSource() : null;
+      }
+
       const unrealizedPnl = currentPrice
         ? this.calculateTradeUnrealizedPnl(trade, currentPrice)
         : null;
@@ -536,7 +552,7 @@ export class TradingEngineService {
         stopLoss: trade.stopLoss?.toString(),
         takeProfit: trade.takeProfit?.toString(),
         openedAt: trade.openedAt,
-        priceSource: currentPrice ? this.marketPrice.getPriceSource() : null,
+        priceSource,
       };
     });
   }

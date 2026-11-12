@@ -49,8 +49,32 @@ export class TradingEngineV2Controller {
     @Body() dto: OpenTradeDto,
     @Request() req: any,
   ) {
+    const correlationId = `trade-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    
+    // ✅ DIAGNOSTIC: Log incoming request (safe - no secrets)
+    console.log(`[${correlationId}] POST /v2/trading-accounts/:accountId/trades`);
+    console.log(`[${correlationId}] Request:`, {
+      accountId,
+      userId: req.user.userId,
+      dto: {
+        symbol: dto.symbol,
+        side: dto.side,
+        volume: dto.volume,
+        stopLoss: dto.stopLoss,
+        takeProfit: dto.takeProfit,
+      },
+    });
+    
     try {
       const trade = await this.tradingEngine.openTrade(accountId, req.user.userId, dto);
+
+      console.log(`[${correlationId}] Success: Trade opened`, {
+        tradeId: trade.id,
+        symbol: trade.symbol,
+        side: trade.side,
+        volume: trade.volume.toString(),
+        entryPrice: trade.entryPrice.toString(),
+      });
 
       return {
         success: true,
@@ -64,9 +88,22 @@ export class TradingEngineV2Controller {
           takeProfit: trade.takeProfit?.toString(),
           status: trade.status,
           openedAt: trade.openedAt,
+          executionMode: 'executionMode' in trade ? trade.executionMode : undefined,
+          fillPolicy: 'fillPolicy' in trade ? trade.fillPolicy : undefined,
+          providerTimestamp: 'providerTimestamp' in trade ? trade.providerTimestamp : undefined,
         },
       };
     } catch (error: any) {
+      // ✅ DIAGNOSTIC: Log error details (safe - structured)
+      console.error(`[${correlationId}] Error:`, {
+        name: error.name,
+        message: error.message,
+        code: error.code,
+        status: error.status,
+        response: error.response,
+        stack: error.stack?.split('\n').slice(0, 5).join('\n'), // First 5 lines only
+      });
+      
       throw this.handleTradingError(error);
     }
   }
@@ -97,6 +134,9 @@ export class TradingEngineV2Controller {
           status: trade.status,
           openedAt: trade.openedAt,
           closedAt: trade.closedAt,
+          executionMode: 'executionMode' in trade ? trade.executionMode : undefined,
+          fillPolicy: 'fillPolicy' in trade ? trade.fillPolicy : undefined,
+          providerTimestamp: 'providerTimestamp' in trade ? trade.providerTimestamp : undefined,
         },
       };
     } catch (error: any) {
@@ -238,6 +278,19 @@ export class TradingEngineV2Controller {
    * Handle trading errors with proper error codes
    */
   private handleTradingError(error: any): never {
+    // Check if error has a BadRequestException structure with details
+    if (error.response && typeof error.response === 'object') {
+      const response = error.response;
+      if (response.code && response.message) {
+        throw new BadRequestException({
+          success: false,
+          error: response.code,
+          message: response.message,
+          details: response.details,
+        });
+      }
+    }
+    
     if (error.message && Object.values(TradingErrorCode).includes(error.message)) {
       const code = error.message as TradingErrorCode;
       
@@ -274,6 +327,12 @@ export class TradingEngineV2Controller {
       });
     }
 
-    throw error;
+    // ✅ SAFE: Return generic message to client, detailed error already logged
+    throw new BadRequestException({
+      success: false,
+      error: 'SYSTEM_ERROR',
+      message: 'Unable to execute trade. Please try again or contact support.',
+      details: error.message || 'An unexpected error occurred',
+    });
   }
 }

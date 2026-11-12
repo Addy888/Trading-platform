@@ -321,7 +321,7 @@ export default function SystemHealthPage() {
                     </div>
                     <div className="flex justify-between items-center py-2 border-b border-gray-200">
                       <span className="text-gray-600">Market Data</span>
-                      <span className="text-gray-600 font-medium">OANDA v20 API</span>
+                      <span className="text-gray-600 font-medium">Twelve Data API · display-only</span>
                     </div>
                   </div>
                 </div>
@@ -334,7 +334,7 @@ export default function SystemHealthPage() {
                   <p>• <strong>Email Service:</strong> Currently in development mode (console logs only). Configure SendGrid/Mailgun/SES for production.</p>
                   <p>• <strong>File Storage:</strong> KYC documents use mock URLs. Integrate with S3/Cloudinary for production.</p>
                   <p>• <strong>Payment Gateway:</strong> Manual approval only. Integrate Stripe/PayPal for automated processing.</p>
-                  <p>• <strong>Market Data:</strong> Quotes and candles use OANDA v20. Configure valid backend-only OANDA credentials for the selected practice or live environment.</p>
+                  <p>• <strong>Market Data:</strong> Quotes and candles use the backend-configured Twelve Data provider. Quotes are display-only and do not provide executable bid/ask prices.</p>
                 </div>
               </div>
             </>

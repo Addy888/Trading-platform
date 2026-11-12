@@ -15,9 +15,10 @@ interface Trade {
 
 interface TradesTableProps {
   trades: Trade[];
+  simulated?: boolean;
 }
 
-export function TradesTable({ trades }: TradesTableProps) {
+export function TradesTable({ trades, simulated = false }: TradesTableProps) {
   if (trades.length === 0) {
     return (
       <div className="text-center py-8 text-gray-400">
@@ -36,7 +37,7 @@ export function TradesTable({ trades }: TradesTableProps) {
             <th className="px-4 py-2 text-right">Volume</th>
             <th className="px-4 py-2 text-right">Entry</th>
             <th className="px-4 py-2 text-right">Exit</th>
-            <th className="px-4 py-2 text-right">P&L</th>
+            <th className="px-4 py-2 text-right">{simulated ? 'Simulated P&L' : 'P&L'}</th>
             <th className="px-4 py-2 text-left">Status</th>
             <th className="px-4 py-2 text-left">Opened</th>
             <th className="px-4 py-2 text-left">Closed</th>

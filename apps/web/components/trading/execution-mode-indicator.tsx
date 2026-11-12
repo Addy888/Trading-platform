@@ -2,14 +2,15 @@
 
 interface ExecutionModeIndicatorProps {
   mode: 'SIMULATED' | 'PAPER' | 'BROKER_SANDBOX' | 'LIVE';
+  marketDataProvider?: string;
   className?: string;
 }
 
-export function ExecutionModeIndicator({ mode, className = '' }: ExecutionModeIndicatorProps) {
+export function ExecutionModeIndicator({ mode, marketDataProvider = 'Twelve Data', className = '' }: ExecutionModeIndicatorProps) {
   const modeConfig = {
     SIMULATED: {
       label: 'SIMULATED MODE',
-      description: 'Simulated execution using OANDA market data',
+      description: `Simulated execution · ${marketDataProvider} display feed`,
       bgColor: 'bg-blue-600',
       textColor: 'text-blue-100',
       borderColor: 'border-blue-500',
@@ -17,7 +18,7 @@ export function ExecutionModeIndicator({ mode, className = '' }: ExecutionModeIn
     },
     PAPER: {
       label: 'PAPER MODE',
-      description: 'Practice trading with real market data',
+      description: `Paper execution · ${marketDataProvider} market data`,
       bgColor: 'bg-yellow-600',
       textColor: 'text-yellow-100',
       borderColor: 'border-yellow-500',

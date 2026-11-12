@@ -1,163 +1,64 @@
 import { HttpException } from '@nestjs/common';
 import { MarketDataManagerService, ProviderStatus } from './market-data-manager.service';
-import { OandaApiError, OandaProvider } from './providers/oanda/oanda.provider';
+import { TwelveDataApiError, TwelveDataProvider } from './providers/twelve-data/twelve-data.provider';
 
-function makeManager(provider: Partial<OandaProvider>) {
-  const oanda = {
+function createService(provider: Partial<TwelveDataProvider> = {}) {
+  const twelve = {
     isConfigured: jest.fn().mockReturnValue(true),
-    getEnvironment: jest.fn().mockReturnValue('practice'),
-    getConfigurationStatus: jest.fn().mockReturnValue({
-      configured: true,
-      missingVariables: [],
-      accountIdConfigured: true,
-      accountSpecificPricingAvailable: true,
-      environment: 'practice',
-      apiBaseUrl: 'https://api-fxpractice.oanda.com',
-    }),
+    getConfigurationStatus: jest.fn().mockReturnValue({ configured: true, missingVariables: [], apiBaseUrl: 'https://api.twelvedata.com', streamingConfigured: false, streamingMode: 'POLLING' }),
+    getSupportedSymbols: jest.fn().mockReturnValue(['EURUSD']),
     validateCredentials: jest.fn().mockResolvedValue(undefined),
+    getQuote: jest.fn().mockResolvedValue({ symbol: 'EURUSD', price: '1.08', timestamp: '2026-10-29T00:00:00.000Z' }),
+    getTimeSeries: jest.fn().mockResolvedValue([{ timestamp: new Date('2026-10-29T00:00:00Z'), open: '1.0', high: '1.1', low: '0.9', close: '1.08' }]),
     ...provider,
-  } as unknown as OandaProvider;
-  return { service: new MarketDataManagerService(oanda), oanda };
+  } as unknown as TwelveDataProvider;
+  return { service: new MarketDataManagerService(twelve), twelve };
 }
 
 describe('MarketDataManagerService', () => {
-  it('deduplicates concurrent quote requests and caches successful responses', async () => {
-    const quote = { bid: '1.08', ask: '1.09', provider: 'OANDA' };
-    const getQuote = jest.fn().mockImplementation(
-      () => new Promise((resolve) => setTimeout(() => resolve(quote), 5)),
-    );
-    const { service } = makeManager({ getQuote });
-
-    const results = await Promise.all([
-      service.getQuote('EURUSD'),
-      service.getQuote('EURUSD'),
-      service.getQuote('EURUSD'),
-    ]);
-    await service.getQuote('EURUSD');
-
-    expect(results).toEqual([quote, quote, quote]);
-    expect(getQuote).toHaveBeenCalledTimes(1);
-    expect(service.getProviderStatus().providers.OANDA.quoteStatus).toBe(ProviderStatus.AVAILABLE);
-  });
-
-  it('stops retrying invalid credentials after the initial validation failure', async () => {
-    const getQuote = jest.fn();
-    const { service, oanda } = makeManager({
-      validateCredentials: jest.fn().mockRejectedValue(
-        new OandaApiError('INVALID_CREDENTIALS', 'OANDA rejected the token.'),
-      ),
-      getQuote,
-    });
-
-    await service.onModuleInit();
-    await expect(service.getQuote('EURUSD')).rejects.toBeInstanceOf(HttpException);
-
-    expect(service.getProviderStatus().providers.OANDA.status).toBe(ProviderStatus.INVALID_CREDENTIALS);
-    expect(service.getProviderStatus().providers.OANDA.quoteStatus).toBe(ProviderStatus.INVALID_CREDENTIALS);
-    expect(oanda.validateCredentials).toHaveBeenCalledTimes(1);
-    expect(getQuote).not.toHaveBeenCalled();
-  });
-
-  it('reports missing configuration without attempting OANDA requests', async () => {
-    const getQuote = jest.fn();
-    const { service, oanda } = makeManager({
-      isConfigured: jest.fn().mockReturnValue(false),
-      getConfigurationStatus: jest.fn().mockReturnValue({
-        configured: false,
-        missingVariables: ['OANDA_API_TOKEN'],
-        accountIdConfigured: false,
-        accountSpecificPricingAvailable: false,
-        environment: 'practice',
-        apiBaseUrl: 'https://api-fxpractice.oanda.com',
-      }),
-      getQuote,
-    });
-
+  it('deduplicates concurrent latest-price requests and exposes polling status', async () => {
+    const { service, twelve } = createService();
+    await Promise.all([service.getQuote('EURUSD'), service.getQuote('EURUSD')]);
+    expect(twelve.getQuote).toHaveBeenCalledTimes(1);
     const status = service.getProviderStatus();
-    await expect(service.getQuote('EURUSD')).rejects.toMatchObject({
-      response: { category: 'NOT_CONFIGURED', retryable: false },
+    expect(status.providers.TWELVE_DATA).toMatchObject({
+      quoteStatus: ProviderStatus.AVAILABLE,
+      quoteLastSuccessAt: expect.any(String),
+      streamingMode: 'POLLING',
     });
-
-    expect(status).toMatchObject({
-      errorCategory: 'NOT_CONFIGURED',
-      configuration: { configured: false, missingVariables: ['OANDA_API_TOKEN'] },
-    });
-    expect(getQuote).not.toHaveBeenCalled();
-    expect(oanda.getConfigurationStatus).toHaveBeenCalled();
+    expect(status.configuration.pollingIntervalMs).toBeGreaterThanOrEqual(900000);
+    expect(status.configuration.staleThresholdMs).toBeGreaterThanOrEqual(status.configuration.pollingIntervalMs);
   });
+  it('keeps quote cache entries scoped to the requested exchange', async () => {
+    const getQuote = jest.fn()
+      .mockResolvedValueOnce({ symbol: 'ABC', price: '10', timestamp: '2026-10-29T00:00:00.000Z' })
+      .mockResolvedValueOnce({ symbol: 'ABC', price: '11', timestamp: '2026-10-29T00:00:00.000Z' });
+    const { service } = createService({ getQuote });
 
-  it('exposes provider outages as retryable health categories', async () => {
-    const { service } = makeManager({
-      validateCredentials: jest.fn().mockRejectedValue(
-        new OandaApiError('NETWORK', 'Unable to reach the selected OANDA environment.'),
-      ),
-    });
+    const nasdaq = await service.getQuote('ABC', 'NASDAQ');
+    const nyse = await service.getQuote('ABC', 'NYSE');
 
-    await service.onModuleInit();
-
-    expect(service.getProviderStatus()).toMatchObject({
-      errorCategory: 'NETWORK',
-      providers: { OANDA: { status: ProviderStatus.ERROR, errorCategory: 'NETWORK' } },
-    });
+    expect(nasdaq.price).toBe('10');
+    expect(nyse.price).toBe('11');
+    expect(getQuote).toHaveBeenNthCalledWith(1, 'ABC', 'NASDAQ');
+    expect(getQuote).toHaveBeenNthCalledWith(2, 'ABC', 'NYSE');
   });
-
-  it('applies the OANDA retry-after cooldown after rate limiting', async () => {
-    const getQuote = jest.fn().mockRejectedValue(
-      new OandaApiError('RATE_LIMITED', 'OANDA rate limited the request.', 60000),
-    );
-    const { service } = makeManager({ getQuote });
-
+  it('never calls a provider when the API key is missing', async () => {
+    const { service, twelve } = createService({ isConfigured: jest.fn().mockReturnValue(false), getQuote: jest.fn() });
+    await expect(service.getQuote('EURUSD')).rejects.toBeInstanceOf(HttpException);
+    expect(twelve.getQuote).not.toHaveBeenCalled();
+    expect(service.getProviderStatus().providers.TWELVE_DATA.status).toBe(ProviderStatus.DISABLED);
+  });
+  it('returns a retryable rate-limit response and honours the cooldown', async () => {
+    const getQuote = jest.fn().mockRejectedValue(new TwelveDataApiError('RATE_LIMITED', 'Rate limited', 60000));
+    const { service } = createService({ getQuote });
     await expect(service.getQuote('EURUSD')).rejects.toBeInstanceOf(HttpException);
     await expect(service.getQuote('GBPUSD')).rejects.toBeInstanceOf(HttpException);
-
     expect(getQuote).toHaveBeenCalledTimes(1);
-    expect(service.getProviderStatus().providers.OANDA.quoteStatus).toBe(ProviderStatus.RATE_LIMITED);
   });
-
-  it('keeps missing account-specific pricing separate from healthy candles', async () => {
-    const getQuote = jest.fn();
-    const getTimeSeries = jest.fn().mockResolvedValue([{ close: '1.1' }]);
-    const { service } = makeManager({
-      getConfigurationStatus: jest.fn().mockReturnValue({
-        configured: true,
-        missingVariables: [],
-        accountIdConfigured: false,
-        accountSpecificPricingAvailable: false,
-        environment: 'practice',
-        apiBaseUrl: 'https://api-fxpractice.oanda.com',
-      }),
-      getQuote,
-      getTimeSeries,
-    });
-
-    await expect(service.getCandles('EURUSD', '1h', 2)).resolves.toHaveLength(1);
-    await expect(service.getQuote('EURUSD')).rejects.toMatchObject({
-      response: { category: 'ACCOUNT_ID_REQUIRED' },
-    });
-
-    expect(service.getProviderStatus().providers.OANDA).toMatchObject({
-      candleStatus: ProviderStatus.AVAILABLE,
-      candleErrorCategory: null,
-      quoteStatus: ProviderStatus.ACCOUNT_ID_REQUIRED,
-      quoteErrorCategory: 'ACCOUNT_ID_REQUIRED',
-    });
-    expect(getQuote).not.toHaveBeenCalled();
-  });
-
-  it('does not replace candle status with quote account failures', async () => {
-    const { service } = makeManager({
-      getQuote: jest.fn().mockRejectedValue(
-        new OandaApiError('ACCOUNT_ACCESS', 'OANDA denied account pricing.'),
-      ),
-      getTimeSeries: jest.fn().mockResolvedValue([{ close: '1.1' }]),
-    });
-
-    await expect(service.getQuote('EURUSD')).rejects.toBeInstanceOf(HttpException);
-    await expect(service.getCandles('EURUSD', '1h', 2)).resolves.toHaveLength(1);
-    expect(service.getProviderStatus().providers.OANDA).toMatchObject({
-      candleStatus: ProviderStatus.AVAILABLE,
-      quoteStatus: ProviderStatus.ACCOUNT_ACCESS_DENIED,
-      quoteErrorCategory: 'ACCOUNT_ACCESS',
-    });
+  it('records invalid credentials from a real validation attempt', async () => {
+    const { service } = createService({ validateCredentials: jest.fn().mockRejectedValue(new TwelveDataApiError('INVALID_CREDENTIALS', 'Rejected')) });
+    await service.onModuleInit();
+    expect(service.getProviderStatus().providers.TWELVE_DATA.status).toBe(ProviderStatus.INVALID_CREDENTIALS);
   });
 });

@@ -15,6 +15,9 @@ export default function TradingDashboardPage() {
 
   const [accounts, setAccounts] = useState<TradingAccount[]>([]);
   const [wallet, setWallet] = useState<Wallet | null>(null);
+  const [testFundingEnabled, setTestFundingEnabled] = useState(false);
+  const [testFundingBalance, setTestFundingBalance] = useState('10000.00');
+  const [useTestFunding, setUseTestFunding] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -41,12 +44,18 @@ export default function TradingDashboardPage() {
     try {
       setLoading(true);
       setError(null);
-      const [accountsData, walletData] = await Promise.all([
+      const [accountsData, walletData, testFundingStatus] = await Promise.all([
         tradingApi.getTradingAccounts(accessToken),
         paymentsApi.getWallet(accessToken).catch(() => null),
+        tradingApi.getTestFundingStatus(accessToken).catch(() => ({ enabled: false, initialBalance: null, currency: null, label: null })),
       ]);
       setAccounts(accountsData);
       setWallet(walletData);
+      setTestFundingEnabled(testFundingStatus.enabled);
+      if (testFundingStatus.enabled && testFundingStatus.initialBalance) {
+        setTestFundingBalance(testFundingStatus.initialBalance);
+      }
+      if (!testFundingStatus.enabled) setUseTestFunding(false);
     } catch (err: any) {
       console.error('Failed to load accounts/wallet:', err);
       setError(err.message || 'Failed to load trading accounts');
@@ -64,23 +73,31 @@ export default function TradingDashboardPage() {
       setActionError(null);
       setActionSuccess(null);
 
-      const amountNum = initialFunding.trim() ? parseFloat(initialFunding.trim()) : 0;
-      if (amountNum < 0 || isNaN(amountNum)) {
-        throw new Error('Initial funding amount must be a positive number');
+      const amountNum = useTestFunding ? 0 : initialFunding.trim() ? parseFloat(initialFunding.trim()) : 0;
+      if (!useTestFunding && (amountNum < 0 || isNaN(amountNum))) {
+        throw new Error('Initial funding amount must be a valid non-negative number');
       }
 
-      const availableWallet = wallet ? parseFloat(wallet.balance) : 0;
-      if (amountNum > availableWallet) {
-        throw new Error(
-          `Insufficient wallet balance. Available: $${availableWallet.toFixed(2)}, Requested: $${amountNum.toFixed(2)}`
-        );
+      if (!useTestFunding) {
+        const availableWallet = wallet ? parseFloat(wallet.balance) : 0;
+        if (amountNum > availableWallet) {
+          throw new Error(
+            `Insufficient wallet balance. Available: $${availableWallet.toFixed(2)}, Requested: $${amountNum.toFixed(2)}`
+          );
+        }
       }
 
       const newAccount = await tradingApi.createTradingAccount(accessToken, {
-        initialFundingAmount: amountNum > 0 ? amountNum.toFixed(2) : undefined,
+        ...(useTestFunding
+          ? { testFunding: true }
+          : { initialFundingAmount: amountNum > 0 ? amountNum.toFixed(2) : undefined }),
       });
 
-      setActionSuccess(`Trading account ${newAccount.accountNumber} created successfully!`);
+      setActionSuccess(
+        useTestFunding
+          ? `Simulated test account ${newAccount.accountNumber} created with $${testFundingBalance} virtual funds. Your wallet was not charged.`
+          : `Trading account ${newAccount.accountNumber} created successfully!`,
+      );
       setInitialFunding('');
       
       // Reload accounts and wallet
@@ -205,6 +222,7 @@ export default function TradingDashboardPage() {
                   onClick={() => {
                     setActionError(null);
                     setActionSuccess(null);
+                    setUseTestFunding(false);
                     setShowCreateModal(true);
                   }}
                   className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-lg shadow-indigo-600/30 transition-all hover:scale-[1.02] active:scale-[0.98]"
@@ -259,6 +277,7 @@ export default function TradingDashboardPage() {
                   onClick={() => {
                     setActionError(null);
                     setActionSuccess(null);
+                    setUseTestFunding(false);
                     setShowCreateModal(true);
                   }}
                   className="w-full sm:w-auto px-6 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-sm shadow-lg shadow-indigo-600/30 transition-all hover:scale-[1.02]"
@@ -303,9 +322,14 @@ export default function TradingDashboardPage() {
                             {account.accountNumber}
                           </div>
                           <div className="text-xs text-slate-400 mt-0.5">
-                            {account.challengePlan?.name || 'Direct Wallet-Funded'}
+                            {account.isTestAccount ? 'Simulated Test Account' : account.challengePlan?.name || 'Direct Wallet-Funded'}
                           </div>
                         </div>
+                        {account.isTestAccount && (
+                          <span className="px-2 py-1 rounded-lg bg-amber-950/60 border border-amber-700/60 text-amber-300 text-[10px] font-bold tracking-wide">
+                            TEST FUNDS
+                          </span>
+                        )}
 
                         <div className="flex flex-col items-end gap-1">
                           <span
@@ -412,10 +436,12 @@ export default function TradingDashboardPage() {
                 </div>
 
                 <p className="text-xs text-slate-400 mb-4">
-                  Create a direct simulated trading account governed by standard risk rules. You can optionally fund it directly from your wallet balance right now, or fund it later.
+                  {useTestFunding
+                    ? 'Create a simulated account with virtual test funds. This is not a deposit, payment, or withdrawable money.'
+                    : 'Create a direct simulated trading account governed by standard risk rules. You can optionally fund it directly from your wallet balance right now, or fund it later.'}
                 </p>
 
-                {wallet && (
+                {wallet && !useTestFunding && (
                   <div className="bg-slate-950 border border-slate-800 rounded-xl p-3 mb-4 flex items-center justify-between">
                     <span className="text-xs text-slate-400">Available Wallet Balance</span>
                     <span className="text-sm font-bold text-emerald-400 font-mono">
@@ -437,7 +463,49 @@ export default function TradingDashboardPage() {
                 )}
 
                 <form onSubmit={handleCreateAccount} className="space-y-4">
-                  <div>
+                  {testFundingEnabled && (
+                    <fieldset className="space-y-2">
+                      <legend className="block text-xs font-semibold text-slate-300 mb-1.5">
+                        Account funding mode
+                      </legend>
+                      <button
+                        type="button"
+                        aria-pressed={!useTestFunding}
+                        onClick={() => setUseTestFunding(false)}
+                        className={`w-full rounded-xl border p-3 text-left text-xs transition-colors ${
+                          !useTestFunding
+                            ? 'border-indigo-500 bg-indigo-950/30 text-white'
+                            : 'border-slate-800 bg-slate-950 text-slate-300'
+                        }`}
+                      >
+                        Wallet-funded account · normal simulated trading
+                      </button>
+                      <button
+                        type="button"
+                        aria-pressed={useTestFunding}
+                        onClick={() => setUseTestFunding(true)}
+                        className={`w-full rounded-xl border p-3 text-left transition-colors ${
+                          useTestFunding
+                            ? 'border-amber-500 bg-amber-950/30 text-amber-100'
+                            : 'border-slate-800 bg-slate-950 text-slate-300'
+                        }`}
+                      >
+                        <span className="block text-xs font-bold">TEST MODE / SIMULATED FUNDS</span>
+                        <span className="block mt-1 text-[11px]">Simulated Test Account · ${testFundingBalance} USD</span>
+                      </button>
+                    </fieldset>
+                  )}
+
+                  {useTestFunding ? (
+                    <div className="rounded-xl border border-amber-800/70 bg-amber-950/30 p-3">
+                      <div className="text-sm font-bold text-amber-200">Simulated Test Account</div>
+                      <div className="mt-1 font-mono text-lg text-white">${testFundingBalance} USD</div>
+                      <p className="mt-2 text-[11px] leading-relaxed text-amber-100/80">
+                        Virtual funds for development/testing only. No wallet debit, payment, real deposit, or withdrawal is created. Standard simulated-account risk rules still apply.
+                      </p>
+                    </div>
+                  ) : (
+                    <div>
                     <label className="block text-xs font-semibold text-slate-300 mb-1.5">
                       Initial Funding Amount (Optional, USD)
                     </label>
@@ -456,7 +524,8 @@ export default function TradingDashboardPage() {
                     <span className="text-[11px] text-slate-500 mt-1 block">
                       Amount will be debited from your wallet balance atomically.
                     </span>
-                  </div>
+                    </div>
+                  )}
 
                   <div className="flex items-center justify-end gap-3 pt-2">
                     <button
@@ -468,7 +537,7 @@ export default function TradingDashboardPage() {
                     </button>
                     <button
                       type="submit"
-                      disabled={actionLoading}
+                      disabled={actionLoading || (useTestFunding && !testFundingEnabled)}
                       className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs shadow-lg shadow-indigo-600/30 disabled:opacity-50 transition-all"
                     >
                       {actionLoading ? 'Creating...' : 'Create Account'}

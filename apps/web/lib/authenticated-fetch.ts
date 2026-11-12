@@ -12,17 +12,31 @@ export async function authenticatedFetch(
   const currentToken = typeof window === 'undefined'
     ? token
     : window.localStorage.getItem('accessToken') || token;
-  const response = await fetch(url, withAuthorization(options, currentToken));
+  
+  let response: Response;
+  try {
+    response = await fetch(url, withAuthorization(options, currentToken));
+  } catch (error) {
+    // Network error - API server might be down or CORS issue
+    console.error('Network error fetching:', url, error);
+    throw new Error('Unable to reach the API server. Please ensure the backend is running on http://localhost:3001');
+  }
+  
   if (response.status !== 401 || await isProviderAuthorizationFailure(response)) return response;
 
   const refreshedToken = await refreshAccessToken();
   if (!refreshedToken) return response;
 
-  const retryResponse = await fetch(url, withAuthorization(options, refreshedToken));
-  if (retryResponse.status === 401 && !(await isProviderAuthorizationFailure(retryResponse))) {
-    dispatchSessionExpired();
+  try {
+    const retryResponse = await fetch(url, withAuthorization(options, refreshedToken));
+    if (retryResponse.status === 401 && !(await isProviderAuthorizationFailure(retryResponse))) {
+      dispatchSessionExpired();
+    }
+    return retryResponse;
+  } catch (error) {
+    console.error('Network error on retry:', url, error);
+    throw new Error('Unable to reach the API server after token refresh');
   }
-  return retryResponse;
 }
 
 function withAuthorization(options: RequestInit, token: string): RequestInit {
