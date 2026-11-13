@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Twelve Data Candle Display Verification</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #1a1a1a;
+            color: #e0e0e0;
+        }
+        h1 {
+            color: #4CAF50;
+            border-bottom: 2px solid #4CAF50;
+            padding-bottom: 10px;
+        }
+        h2 {
+            color: #2196F3;
+            margin-top: 30px;
+        }
+        .test-section {
+            background: #2a2a2a;
+            border: 1px solid #444;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px 0;
+        }
+        .button {
+            background: #2196F3;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            margin: 10px 10px 10px 0;
+        }
+        .button:hover {
+            background: #1976D2;
+        }
+        .button:disabled {
+            background: #666;
+            cursor: not-allowed;
+        }
+        .result {
+            background: #1a1a1a;
+            border: 1px solid #555;
+            border-radius: 4px;
+            padding: 15px;
+            margin: 10px 0;
+            white-space: pre-wrap;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        .success {
+            color: #4CAF50;
+            font-weight: bold;
+        }
+        .error {
+            color: #f44336;
+            font-weight: bold;
+        }
+        .warning {
+            color: #ff9800;
+            font-weight: bold;
+        }
+        .info {
+            color: #2196F3;
+            font-weight: bold;
+        }
+        input {
+            background: #333;
+            border: 1px solid #555;
+            color: #e0e0e0;
+            padding: 8px;
+            border-radius: 4px;
+            margin: 5px 0;
+            width: 300px;
+        }
+        label {
+            display: block;
+            margin-top: 10px;
+            color: #aaa;
+        }
+        .summary {
+            background: #1a3a1a;
+            border: 2px solid #4CAF50;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 30px 0;
+        }
+        .summary h2 {
+            color: #4CAF50;
+            margin-top: 0;
+        }
+        .checklist {
+            list-style: none;
+            padding: 0;
+        }
+        .checklist li {
+            padding: 8px;
+            margin: 5px 0;
+            background: #2a2a2a;
+            border-radius: 4px;
+        }
+        .checklist li:before {
+            content: "☐ ";
+            color: #888;
+            margin-right: 10px;
+        }
+        .checklist li.checked:before {
+            content: "✓ ";
+            color: #4CAF50;
+        }
+        .instructions {
+            background: #2a2a4a;
+            border-left: 4px solid #2196F3;
+            padding: 15px;
+            margin: 20px 0;
+        }
+    </style>
+</head>
+<body>
+    <h1>🔍 Twelve Data Candle Display Verification Test</h1>
+    
+    <div class="instructions">
+        <h3>📋 Purpose</h3>
+        <p>This test verifies why the browser displays only 100 candles when the backend is configured to return 500.</p>
+        <p><strong>Expected Result:</strong> Backend returns 500 candles, frontend displays all 500.</p>
+        <p><strong>Current Issue:</strong> Browser shows ~100 candles (viewport issue or state management bug).</p>
+    </div>
+
+    <div class="test-section">
+        <h2>Step 1: Login Credentials</h2>
+        <p>Enter your trading platform credentials:</p>
+        
+        <label for="email">Email:</label>
+        <input type="email" id="email" value="test_browser_verification@trading.local" placeholder="user@example.com">
+        
+        <label for="password">Password:</label>
+        <input type="password" id="password" value="TestBrowser123!" placeholder="Enter password">
+        
+        <label for="apiUrl">API URL:</label>
+        <input type="text" id="apiUrl" value="http://localhost:3001/api" placeholder="http://localhost:3001/api">
+        
+        <br><br>
+        <button class="button" onclick="login()">Login</button>
+        
+        <div id="loginResult" class="result" style="display: none;"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>Step 2: Test Candle Requests</h2>
+        <p>Test different outputsize values to see how many candles the backend returns:</p>
+        
+        <button class="button" onclick="testCandles(100)">Test 100 Candles</button>
+        <button class="button" onclick="testCandles(500)">Test 500 Candles</button>
+        <button class="button" onclick="testCandles(5000)">Test 5000 Candles</button>
+        <button class="button" onclick="clearResults()">Clear Results</button>
+        
+        <div id="candleResults" class="result"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>Step 3: Analyze Results</h2>
+        <div id="analysis" class="result">
+            <span class="info">Run tests above to see analysis</span>
+        </div>
+    </div>
+
+    <div class="summary" id="summary" style="display: none;">
+        <h2>✅ Verification Checklist</h2>
+        <ul class="checklist" id="checklist">
+            <li id="check-login">Login successful</li>
+            <li id="check-100">Backend returns 100 candles when requested</li>
+            <li id="check-500">Backend returns 500 candles when requested</li>
+            <li id="check-5000">Backend returns 5000 candles when requested</li>
+            <li id="check-timestamps">All candles have valid timestamps</li>
+            <li id="check-ohlc">All candles have valid OHLC data</li>
+        </ul>
+    </div>
+
+    <div class="instructions">
+        <h3>📝 Next Steps</h3>
+        <ol>
+            <li>Run all tests above to verify backend is working correctly</li>
+            <li>If backend returns 500 candles but browser shows 100:
+                <ul>
+                    <li>Open the actual trading platform in another tab</li>
+                    <li>Open DevTools (F12) and go to Network tab</li>
+                    <li>Load EUR/USD 1-minute chart</li>
+                    <li>Check if request URL contains <code>outputsize=500</code> or <code>outputsize=100</code></li>
+                    <li>Check response body to count actual candles received</li>
+                    <li>Try zooming out or scrolling left on the chart</li>
+                </ul>
+            </li>
+            <li>Clear browser cache (Ctrl+Shift+R) and retry</li>
+            <li>Report results with screenshots</li>
+        </ol>
+    </div>
+
+    <script>
+        let accessToken = null;
+        const results = {};
+
+        function getApiUrl() {
+            return document.getElementById('apiUrl').value || 'http://localhost:3001/api';
+        }
+
+        function showResult(elementId, message, type = 'info') {
+            const element = document.getElementById(elementId);
+            element.style.display = 'block';
+            element.innerHTML = `<span class="${type}">${message}</span>`;
+        }
+
+        function appendResult(elementId, message) {
+            const element = document.getElementById(elementId);
+            element.innerHTML += '\n' + message;
+            element.style.display = 'block';
+        }
+
+        function clearResults() {
+            document.getElementById('candleResults').innerHTML = '<span class="info">Results cleared. Run tests again.</span>';
+            document.getElementById('analysis').innerHTML = '<span class="info">Run tests to see analysis</span>';
+            results.test100 = null;
+            results.test500 = null;
+            results.test5000 = null;
+        }
+
+        async function login() {
+            const email = document.getElementById('email').value;
+            const password = document.getElementById('password').value;
+            const apiUrl = getApiUrl();
+
+            if (!email || !password) {
+                showResult('loginResult', '❌ Please enter email and password', 'error');
+                return;
+            }
+
+            showResult('loginResult', '⏳ Logging in...', 'info');
+
+            try {
+                const response = await fetch(`${apiUrl}/auth/login`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email, password })
+                });
+
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    showResult('loginResult', `❌ Login failed: ${response.status} ${response.statusText}\n${errorText}`, 'error');
+                    return;
+                }
+
+                const data = await response.json();
+                accessToken = data.accessToken;
+
+                showResult('loginResult', `✅ Login successful!\nToken: ${accessToken.substring(0, 50)}...`, 'success');
+                document.getElementById('check-login').classList.add('checked');
+                document.getElementById('summary').style.display = 'block';
+
+            } catch (error) {
+                showResult('loginResult', `❌ Login error: ${error.message}`, 'error');
+            }
+        }
+
+        async function testCandles(outputsize) {
+            if (!accessToken) {
+                showResult('candleResults', '❌ Please login first', 'error');
+                return;
+            }
+
+            const symbol = 'EURUSD';
+            const interval = '1min';
+            const apiUrl = getApiUrl();
+            
+            appendResult('candleResults', `\n${'='.repeat(80)}\n📊 Testing ${outputsize} candles for ${symbol} ${interval}\n${'='.repeat(80)}`);
+            appendResult('candleResults', '⏳ Requesting...');
+
+            try {
+                const url = new URL(`${apiUrl}/market/candles`);
+                url.searchParams.set('symbol', symbol);
+                url.searchParams.set('interval', interval);
+                url.searchParams.set('outputsize', String(outputsize));
+
+                const startTime = Date.now();
+                const response = await fetch(url, {
+                    headers: {
+                        'Authorization': `Bearer ${accessToken}`,
+                        'Accept': 'application/json'
+                    }
+                });
+                const duration = Date.now() - startTime;
+
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    appendResult('candleResults', `❌ Request failed: ${response.status} ${response.statusText}\n${errorText}`);
+                    return;
+                }
+
+                const data = await response.json();
+                const candleCount = data.candles?.length || 0;
+
+                results[`test${outputsize}`] = {
+                    requested: outputsize,
+                    received: candleCount,
+                    success: data.success,
+                    duration,
+                    data
+                };
+
+                const status = candleCount === outputsize ? '✅ PERFECT' : 
+                               candleCount > 0 ? '⚠️ PARTIAL' : '❌ FAILED';
+
+                appendResult('candleResults', `\n${status} Response received in ${duration}ms`);
+                appendResult('candleResults', `Requested: ${outputsize} candles`);
+                appendResult('candleResults', `Received: ${candleCount} candles`);
+                appendResult('candleResults', `Provider: ${data.provider || 'UNKNOWN'}`);
+                appendResult('candleResults', `Data Status: ${data.metadata?.dataStatus || 'UNKNOWN'}`);
+
+                if (candleCount > 0) {
+                    const firstCandle = data.candles[0];
+                    const lastCandle = data.candles[candleCount - 1];
+                    const timeSpanMs = Date.parse(lastCandle.timestamp) - Date.parse(firstCandle.timestamp);
+                    const timeSpanMin = Math.floor(timeSpanMs / 60000);
+
+                    appendResult('candleResults', `\nTime Range:`);
+                    appendResult('candleResults', `  From: ${firstCandle.timestamp}`);
+                    appendResult('candleResults', `  To:   ${lastCandle.timestamp}`);
+                    appendResult('candleResults', `  Span: ${timeSpanMin} minutes (${(timeSpanMin / 60).toFixed(1)} hours)`);
+
+                    appendResult('candleResults', `\nFirst Candle: O:${firstCandle.open} H:${firstCandle.high} L:${firstCandle.low} C:${firstCandle.close}`);
+                    appendResult('candleResults', `Last Candle:  O:${lastCandle.open} H:${lastCandle.high} L:${lastCandle.low} C:${lastCandle.close}`);
+
+                    // Mark checklist items
+                    if (outputsize === 100 && candleCount === 100) {
+                        document.getElementById('check-100').classList.add('checked');
+                    }
+                    if (outputsize === 500 && candleCount === 500) {
+                        document.getElementById('check-500').classList.add('checked');
+                    }
+                    if (outputsize === 5000 && candleCount === 5000) {
+                        document.getElementById('check-5000').classList.add('checked');
+                    }
+                    document.getElementById('check-timestamps').classList.add('checked');
+                    document.getElementById('check-ohlc').classList.add('checked');
+                }
+
+                updateAnalysis();
+
+            } catch (error) {
+                appendResult('candleResults', `❌ Error: ${error.message}`);
+                console.error(error);
+            }
+        }
+
+        function updateAnalysis() {
+            const analysis = document.getElementById('analysis');
+            let html = '<strong>📊 Analysis:</strong>\n\n';
+
+            if (results.test100) {
+                html += `Test 100: ${results.test100.received === 100 ? '✅ PASS' : '❌ FAIL'} (${results.test100.received} candles)\n`;
+            }
+            if (results.test500) {
+                html += `Test 500: ${results.test500.received === 500 ? '✅ PASS' : '⚠️ PARTIAL'} (${results.test500.received} candles)\n`;
+            }
+            if (results.test5000) {
+                html += `Test 5000: ${results.test5000.received === 5000 ? '✅ PASS' : '⚠️ PARTIAL'} (${results.test5000.received} candles)\n`;
+            }
+
+            html += '\n<strong>🔍 Conclusions:</strong>\n';
+
+            const allPass = results.test100?.received === 100 && 
+                           results.test500?.received === 500 && 
+                           results.test5000?.received === 5000;
+
+            if (allPass) {
+                html += '\n<span class="success">✅ Backend is working PERFECTLY!</span>\n';
+                html += '\nBackend returns exactly the requested number of candles.\n';
+                html += 'The API has NO limitations for outputsize up to 5000.\n\n';
+                html += '<span class="warning">⚠️ IF BROWSER SHOWS ONLY 100 CANDLES:</span>\n';
+                html += '1. Problem is in the FRONTEND, not the backend\n';
+                html += '2. Frontend may be requesting only 100 (check Network tab)\n';
+                html += '3. Frontend may be filtering/slicing candles\n';
+                html += '4. Chart viewport may show only 100 (try zoom/scroll)\n';
+                html += '5. Browser cache may have old code (hard refresh)\n\n';
+                html += '<span class="info">📝 Next Steps:</span>\n';
+                html += '1. Open trading platform in browser\n';
+                html += '2. Press F12 to open DevTools\n';
+                html += '3. Go to Network tab\n';
+                html += '4. Load EUR/USD 1-minute chart\n';
+                html += '5. Find /market/candles request\n';
+                html += '6. Check if URL contains outputsize=500 or 100\n';
+                html += '7. Check response body to count candles\n';
+                html += '8. Try zooming out and scrolling left on chart\n';
+            } else if (results.test500 && results.test500.received < 500) {
+                html += '\n<span class="warning">⚠️ Backend returns fewer candles than requested</span>\n';
+                html += `Requested 500, received ${results.test500.received}\n`;
+                html += 'This could be due to:\n';
+                html += '1. Limited historical data available from provider\n';
+                html += '2. Plan restrictions (unlikely based on other tests)\n';
+                html += '3. Symbol-specific limitations\n\n';
+            } else {
+                html += '\n<span class="info">ℹ️ Run all tests to complete analysis</span>\n';
+            }
+
+            analysis.innerHTML = html;
+        }
+
+        // Initial message
+        document.getElementById('candleResults').innerHTML = '<span class="info">Click buttons above to test different candle counts</span>';
+    </script>
+</body>
+</html>

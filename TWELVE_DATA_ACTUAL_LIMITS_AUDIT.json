@@ -1,0 +1,235 @@
+{
+  "timestamp": "2026-11-13T04:15:16.237Z",
+  "apiKey": "***CONFIGURED***",
+  "tests": {
+    "EURUSD_quote": {
+      "status": 200,
+      "success": true,
+      "dataCount": 0,
+      "body": {
+        "sampleData": null
+      },
+      "duration": 536
+    },
+    "EURUSD_1min_100_candles": {
+      "status": 200,
+      "success": true,
+      "dataCount": 100,
+      "body": {
+        "meta": {
+          "symbol": "EUR/USD",
+          "interval": "1min",
+          "currency_base": "Euro",
+          "currency_quote": "US Dollar",
+          "type": "Physical Currency"
+        },
+        "status": "ok",
+        "sampleData": [
+          {
+            "datetime": "2026-11-13 02:35:00",
+            "open": "1.10584",
+            "high": "1.10584",
+            "low": "1.10575",
+            "close": "1.10577"
+          },
+          {
+            "datetime": "2026-11-13 02:36:00",
+            "open": "1.1058",
+            "high": "1.10589",
+            "low": "1.10578",
+            "close": "1.1058"
+          },
+          {
+            "datetime": "2026-11-13 02:37:00",
+            "open": "1.10581",
+            "high": "1.1059",
+            "low": "1.10581",
+            "close": "1.10589"
+          }
+        ]
+      },
+      "duration": 285
+    },
+    "EURUSD_1min_500_candles": {
+      "status": 200,
+      "success": true,
+      "dataCount": 500,
+      "body": {
+        "meta": {
+          "symbol": "EUR/USD",
+          "interval": "1min",
+          "currency_base": "Euro",
+          "currency_quote": "US Dollar",
+          "type": "Physical Currency"
+        },
+        "status": "ok",
+        "sampleData": [
+          {
+            "datetime": "2026-11-12 19:55:00",
+            "open": "1.10544",
+            "high": "1.10546",
+            "low": "1.10541",
+            "close": "1.10544"
+          },
+          {
+            "datetime": "2026-11-12 19:56:00",
+            "open": "1.10542",
+            "high": "1.10555",
+            "low": "1.10542",
+            "close": "1.10552"
+          },
+          {
+            "datetime": "2026-11-12 19:57:00",
+            "open": "1.10547",
+            "high": "1.10552",
+            "low": "1.10547",
+            "close": "1.10552"
+          }
+        ]
+      },
+      "duration": 241
+    },
+    "EURUSD_1min_5000_candles": {
+      "status": 200,
+      "success": true,
+      "dataCount": 5000,
+      "body": {
+        "meta": {
+          "symbol": "EUR/USD",
+          "interval": "1min",
+          "currency_base": "Euro",
+          "currency_quote": "US Dollar",
+          "type": "Physical Currency"
+        },
+        "status": "ok",
+        "sampleData": [
+          {
+            "datetime": "2026-11-09 16:55:00",
+            "open": "1.12047",
+            "high": "1.12047",
+            "low": "1.12034",
+            "close": "1.12037"
+          },
+          {
+            "datetime": "2026-11-09 16:56:00",
+            "open": "1.12043",
+            "high": "1.12048",
+            "low": "1.12041",
+            "close": "1.12047"
+          },
+          {
+            "datetime": "2026-11-09 16:57:00",
+            "open": "1.12044",
+            "high": "1.1205",
+            "low": "1.1204",
+            "close": "1.12049"
+          }
+        ]
+      },
+      "duration": 358
+    },
+    "GBPUSD_quote": {
+      "status": 200,
+      "success": true,
+      "dataCount": 0,
+      "body": {
+        "sampleData": null
+      },
+      "duration": 364
+    },
+    "USDJPY_1min_100_candles": {
+      "status": 200,
+      "success": true,
+      "dataCount": 100,
+      "body": {
+        "meta": {
+          "symbol": "USD/JPY",
+          "interval": "1min",
+          "currency_base": "US Dollar",
+          "currency_quote": "Japanese Yen",
+          "type": "Physical Currency"
+        },
+        "status": "ok",
+        "sampleData": [
+          {
+            "datetime": "2026-11-13 02:35:00",
+            "open": "159.92141",
+            "high": "159.92657",
+            "low": "159.92141",
+            "close": "159.92657"
+          },
+          {
+            "datetime": "2026-11-13 02:36:00",
+            "open": "159.9233",
+            "high": "159.9368",
+            "low": "159.92001",
+            "close": "159.93261"
+          },
+          {
+            "datetime": "2026-11-13 02:37:00",
+            "open": "159.92554",
+            "high": "159.93344",
+            "low": "159.92554",
+            "close": "159.93311"
+          }
+        ]
+      },
+      "duration": 228
+    },
+    "EURUSD_1h_100_candles": {
+      "status": 200,
+      "success": true,
+      "dataCount": 100,
+      "body": {
+        "meta": {
+          "symbol": "EUR/USD",
+          "interval": "1h",
+          "currency_base": "Euro",
+          "currency_quote": "US Dollar",
+          "type": "Physical Currency"
+        },
+        "status": "ok",
+        "sampleData": [
+          {
+            "datetime": "2026-11-09 01:00:00",
+            "open": "1.11484",
+            "high": "1.11583",
+            "low": "1.1147",
+            "close": "1.11558"
+          },
+          {
+            "datetime": "2026-11-09 02:00:00",
+            "open": "1.11556",
+            "high": "1.1157",
+            "low": "1.11526",
+            "close": "1.11552"
+          },
+          {
+            "datetime": "2026-11-09 03:00:00",
+            "open": "1.1155",
+            "high": "1.11557",
+            "low": "1.11519",
+            "close": "1.11534"
+          }
+        ]
+      },
+      "duration": 233
+    },
+    "websocket_connection": {
+      "success": true,
+      "subscriptionStatus": "ok",
+      "message": {
+        "event": "subscribe-status",
+        "status": "ok",
+        "success": [
+          {
+            "symbol": "EUR/USD",
+            "exchange": "PHYSICAL CURRENCY",
+            "type": "PHYSICAL_CURRENCY"
+          }
+        ],
+        "fails": null
+      }
+    }
+  }
+}

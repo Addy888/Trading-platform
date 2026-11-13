@@ -40,6 +40,11 @@ export default function TradingTerminalPage() {
   const candleHistoryKeyRef = useRef<string | null>(null);
   const hasCandleHistoryRef = useRef(false);
   const marketDataEnabledRef = useRef(false);
+  // ✅ PHASE 2: Historical pagination state
+  const [isLoadingOlderCandles, setIsLoadingOlderCandles] = useState(false);
+  const [hasMoreHistory, setHasMoreHistory] = useState(true);
+  const paginationRequestRef = useRef(0);
+  const lastPaginationTriggerRef = useRef(0);
 
   // Core State
   const [account, setAccount] = useState<TradingAccount | null>(null);
@@ -308,6 +313,149 @@ export default function TradingTerminalPage() {
     }
   };
 
+  // ✅ PHASE 2: Load older historical candles (pagination)
+  const loadOlderCandles = async () => {
+    if (!accessToken || !marketDataEnabledRef.current || !candles.length || !hasMoreHistory) {
+      return;
+    }
+    
+    // Debounce: prevent rapid pagination requests
+    const now = Date.now();
+    if (now - lastPaginationTriggerRef.current < 2000) {
+      console.log('[loadOlderCandles] Debounced - too soon since last request');
+      return;
+    }
+    
+    if (isLoadingOlderCandles) {
+      console.log('[loadOlderCandles] Already loading older candles');
+      return;
+    }
+    
+    const requestId = ++paginationRequestRef.current;
+    const oldestCandle = candles[0];
+    const oldestTime = oldestCandle.time;
+    
+    lastPaginationTriggerRef.current = now;
+    setIsLoadingOlderCandles(true);
+    
+    const intervalMap: Record<string, string> = { 
+      '1m': '1min',
+      '5m': '5min',
+      '15m': '15min',
+      '30m': '30min',
+      '1H': '1h',
+      '4H': '4h',
+      '1D': '1day'
+    };
+    
+    const mappedInterval = intervalMap[selectedTimeframe];
+    if (!mappedInterval) {
+      setIsLoadingOlderCandles(false);
+      return;
+    }
+    
+    try {
+      console.log('[loadOlderCandles] Request:', {
+        symbol: selectedSymbol,
+        timeframe: selectedTimeframe,
+        mappedInterval,
+        oldestTime: new Date(oldestTime * 1000).toISOString(),
+        batchSize: 200,
+        requestId
+      });
+      
+      // Request candles with a larger batch to go further back
+      const result = await marketApi.getCandles(
+        accessToken,
+        selectedSymbol,
+        mappedInterval,
+        500, // Request 500 to get a good batch of older candles
+        selectedExchange
+      );
+      
+      if (requestId !== paginationRequestRef.current) {
+        console.log('[loadOlderCandles] Stale response, discarding');
+        return;
+      }
+      
+      if (!result.success || !result.candles?.length) {
+        console.log('[loadOlderCandles] No more history available');
+        setHasMoreHistory(false);
+        return;
+      }
+      
+      // Normalize candles
+      const normalizedCandles = result.candles.map((candle, idx) => {
+        const timestamp = Date.parse(candle.timestamp);
+        if (!Number.isFinite(timestamp) || timestamp <= 0) {
+          throw new Error(`Invalid timestamp at candle ${idx}: ${candle.timestamp}`);
+        }
+        
+        const time = Math.floor(timestamp / 1000);
+        const open = Number(candle.open);
+        const high = Number(candle.high);
+        const low = Number(candle.low);
+        const close = Number(candle.close);
+        
+        if (!Number.isFinite(open) || !Number.isFinite(high) || !Number.isFinite(low) || !Number.isFinite(close)) {
+          throw new Error(`Non-finite OHLC values at candle ${idx}`);
+        }
+        
+        if (open <= 0 || high <= 0 || low <= 0 || close <= 0) {
+          throw new Error(`Non-positive OHLC values at candle ${idx}`);
+        }
+        
+        return { time, open, high, low, close };
+      });
+      
+      // Find candles that are older than our current oldest candle
+      const olderCandles = normalizedCandles.filter(c => c.time < oldestTime);
+      
+      if (olderCandles.length === 0) {
+        console.log('[loadOlderCandles] No older candles in response - history exhausted');
+        setHasMoreHistory(false);
+        return;
+      }
+      
+      // Sort in ascending order and remove duplicates
+      const uniqueOlderCandles = olderCandles
+        .sort((a, b) => a.time - b.time)
+        .filter((candle, idx, arr) => idx === 0 || candle.time !== arr[idx - 1].time);
+      
+      console.log('[loadOlderCandles] Success:', {
+        symbol: selectedSymbol,
+        timeframe: selectedTimeframe,
+        olderCandlesFound: uniqueOlderCandles.length,
+        oldestNewCandle: new Date(uniqueOlderCandles[0].time * 1000).toISOString(),
+        previousOldest: new Date(oldestTime * 1000).toISOString(),
+        totalCandles: uniqueOlderCandles.length + candles.length
+      });
+      
+      // Prepend older candles to existing history
+      setCandles(prev => [...uniqueOlderCandles, ...prev]);
+      
+      // Check if we've exhausted history (got fewer candles than we already had in that direction)
+      if (uniqueOlderCandles.length < 100) {
+        console.log('[loadOlderCandles] Received fewer than 100 older candles - likely near history limit');
+        setHasMoreHistory(false);
+      }
+      
+    } catch (err: any) {
+      if (requestId !== paginationRequestRef.current) return;
+      
+      console.error('[loadOlderCandles] Error:', err.message || err);
+      
+      // Don't mark hasMoreHistory as false on error - allow retry
+      if (err.message?.includes('No candles') || err.message?.includes('exhausted')) {
+        setHasMoreHistory(false);
+      }
+    } finally {
+      if (requestId === paginationRequestRef.current) {
+        setIsLoadingOlderCandles(false);
+      }
+    }
+  };
+
   const loadCandles = async (symbol: string, timeframe: string, exchange?: string) => {
     if (!accessToken || !marketDataEnabledRef.current) return;
     if (candleRetryTimerRef.current) clearTimeout(candleRetryTimerRef.current);
@@ -319,6 +467,10 @@ export default function TradingTerminalPage() {
       setCandles([]);
       setLatestCandleUpdate(null);
       clearWsLatestCandle(); // ✅ Clear stale WebSocket candle when switching symbol/timeframe
+      // ✅ PHASE 2: Reset pagination state on symbol/timeframe change
+      setHasMoreHistory(true);
+      setIsLoadingOlderCandles(false);
+      paginationRequestRef.current++;
     }
     setCandlesLoading(!hasCandleHistoryRef.current);
     setChartError(null);
@@ -342,16 +494,21 @@ export default function TradingTerminalPage() {
     }
     
     try {
+      // ✅ PHASE 1: Load 500 candles initially for better historical context
+      // Use 100 for polling updates to avoid rate limits, 500 for initial/refresh loads
+      const outputsize = hasCandleHistoryRef.current ? 100 : 500;
+      
       console.log('[loadCandles] Request:', {
         symbol,
         requestedTimeframe: timeframe,
         mappedInterval,
         exchange: exchange || 'none',
-        outputsize: 100,
+        outputsize,
+        isInitialLoad: !hasCandleHistoryRef.current,
         requestId
       });
       
-      const result = await marketApi.getCandles(accessToken, symbol, mappedInterval, 100, exchange);
+      const result = await marketApi.getCandles(accessToken, symbol, mappedInterval, outputsize, exchange);
       
       if (requestId !== candleRequestRef.current) {
         console.log('[loadCandles] Stale response, discarding (request superseded)');
@@ -1059,6 +1216,15 @@ export default function TradingTerminalPage() {
                 onChartError={handleChartRenderError}
                 loading={candlesLoading}
                 onRetry={() => void loadTwelveDataMarketData()}
+                onLoadOlderCandles={loadOlderCandles}
+                isLoadingHistory={isLoadingOlderCandles}
+                hasMoreHistory={hasMoreHistory}
+                onGoToLatest={() => {
+                  // Scroll to latest candle
+                  if (candles.length > 0) {
+                    setLatestCandleUpdate(candles[candles.length - 1]);
+                  }
+                }}
               />
             </div>
 

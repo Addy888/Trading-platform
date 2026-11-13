@@ -27,14 +27,55 @@ interface CandlestickChartProps {
   onChartError?: (message: string | null) => void;
   loading?: boolean;
   onRetry?: () => void;
+  // ✅ PHASE 2 & 5: Pagination and navigation props
+  onLoadOlderCandles?: () => void;
+  isLoadingHistory?: boolean;
+  hasMoreHistory?: boolean;
+  onGoToLatest?: () => void;
 }
 
-export function CandlestickChart({ data, latestCandleUpdate, symbol, timeframe, dataSource, connectionState, latestPrice, lastUpdatedAt, serverFetchedAt, quoteReceivedAt, error, renderError, onChartError, loading = false, onRetry }: CandlestickChartProps) {
+export function CandlestickChart({ 
+  data, 
+  latestCandleUpdate, 
+  symbol, 
+  timeframe, 
+  dataSource, 
+  connectionState, 
+  latestPrice, 
+  lastUpdatedAt, 
+  serverFetchedAt, 
+  quoteReceivedAt, 
+  error, 
+  renderError, 
+  onChartError, 
+  loading = false, 
+  onRetry,
+  // ✅ PHASE 2 & 5: Pagination and navigation props
+  onLoadOlderCandles,
+  isLoadingHistory = false,
+  hasMoreHistory = true,
+  onGoToLatest
+}: CandlestickChartProps) {
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const candleSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
   const onChartErrorRef = useRef(onChartError);
   const hasLatestPrice = typeof latestPrice === 'number' && Number.isFinite(latestPrice) && latestPrice > 0;
+
+  // ✅ PHASE 5: Handle "Go To Latest" action
+  useEffect(() => {
+    if (onGoToLatest && chartRef.current) {
+      // Expose scrollToRealTime functionality
+      const handleGoToLatest = () => {
+        if (chartRef.current) {
+          chartRef.current.timeScale().scrollToRealTime();
+        }
+      };
+      
+      // Store the handler
+      (window as any).__chartGoToLatest = handleGoToLatest;
+    }
+  }, [onGoToLatest]);
 
   useEffect(() => {
     const container = chartContainerRef.current;
@@ -202,6 +243,45 @@ export function CandlestickChart({ data, latestCandleUpdate, symbol, timeframe, 
     }
   }, [data, latestCandleUpdate]);
 
+  // ✅ PHASE 2: Detect scroll to left edge and trigger historical pagination
+  useEffect(() => {
+    if (!chartRef.current || !onLoadOlderCandles || !data.length || isLoadingHistory || !hasMoreHistory) {
+      return;
+    }
+    
+    const timeScale = chartRef.current.timeScale();
+    
+    const handleVisibleRangeChange = () => {
+      try {
+        const logicalRange = timeScale.getVisibleLogicalRange();
+        if (!logicalRange) return;
+        
+        const dataLength = data.length;
+        if (dataLength === 0) return;
+        
+        // Trigger load when user is within 10% of the left edge (oldest data)
+        const leftEdgeThreshold = dataLength * 0.1;
+        
+        if (logicalRange.from < leftEdgeThreshold) {
+          console.log('[CandlestickChart] User near left edge, triggering historical load:', {
+            logicalFrom: logicalRange.from,
+            threshold: leftEdgeThreshold,
+            dataLength
+          });
+          onLoadOlderCandles();
+        }
+      } catch (err) {
+        console.error('[CandlestickChart] Error in visible range handler:', err);
+      }
+    };
+    
+    const unsubscribe = timeScale.subscribeVisibleLogicalRangeChange(handleVisibleRangeChange);
+    
+    return () => {
+      if (unsubscribe) unsubscribe();
+    };
+  }, [data, onLoadOlderCandles, isLoadingHistory, hasMoreHistory]);
+
   return (
     <div className="relative w-full h-full min-h-[320px]">
       <div className="absolute top-2 left-2 z-10 max-w-[calc(100%-1rem)] flex flex-wrap items-center gap-x-2 gap-y-1 bg-gray-900 bg-opacity-90 px-3 py-2 rounded">
@@ -243,6 +323,40 @@ export function CandlestickChart({ data, latestCandleUpdate, symbol, timeframe, 
           {dataSource || 'Twelve Data'} · {connectionState === 'CONNECTED' ? 'quote available · polling' : connectionState === 'STALE' ? 'stale quote' : connectionState === 'CONNECTING' ? 'requesting quote' : connectionState === 'ERROR' ? 'quote request error' : 'no quote'}
         </span>
       </div>
+      
+      {/* ✅ PHASE 5: Navigation controls */}
+      {onGoToLatest && data.length > 0 && (
+        <div className="absolute top-2 right-2 z-10 flex flex-col gap-2">
+          <button
+            onClick={() => {
+              if (chartRef.current) {
+                chartRef.current.timeScale().scrollToRealTime();
+              }
+            }}
+            className="px-3 py-1.5 bg-blue-600 text-white text-xs rounded hover:bg-blue-500 transition-colors shadow-lg"
+            title="Jump to most recent candle"
+          >
+            Go To Latest
+          </button>
+          
+          {isLoadingHistory && (
+            <div className="px-3 py-1.5 bg-gray-800 bg-opacity-90 text-gray-300 text-xs rounded shadow-lg flex items-center gap-2">
+              <svg className="animate-spin h-3 w-3 text-gray-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+              Loading history...
+            </div>
+          )}
+          
+          {!hasMoreHistory && data.length > 100 && (
+            <div className="px-3 py-1.5 bg-gray-800 bg-opacity-90 text-gray-500 text-xs rounded shadow-lg">
+              All history loaded
+            </div>
+          )}
+        </div>
+      )}
+      
       {(data.length === 0 || renderError) && (
         <div className="absolute inset-0 flex items-center justify-center bg-gray-950 bg-opacity-50 z-20">
           <div className="text-center p-6 bg-gray-900 rounded-lg border border-gray-800">
