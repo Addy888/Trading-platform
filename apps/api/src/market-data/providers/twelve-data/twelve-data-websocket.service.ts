@@ -1,6 +1,8 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import WebSocket from 'ws';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { compactForexSymbol, providerForexSymbol } from '../../forex-symbols';
+import { ForexConnectionState } from '../../forex-feed.interface';
 
 export interface TwelveDataPriceUpdate {
   symbol: string;
@@ -11,6 +13,7 @@ export interface TwelveDataPriceUpdate {
 
 type ConnectionState = 'DISCONNECTED' | 'CONNECTING' | 'CONNECTED' | 'ERROR';
 type SubscriptionStatus = 'PENDING' | 'SUBSCRIBED' | 'UNSUBSCRIBED' | 'FAILED';
+type TwelveDataRestriction = string | null;
 
 interface SubscriptionState {
   symbol: string;
@@ -45,6 +48,8 @@ export class TwelveDataWebSocketService implements OnModuleInit, OnModuleDestroy
   private isManualDisconnect = false;
   private connectionGeneration = 0; // Track connection identity
   private cancelledGenerations = new Set<number>(); // Track cancelled connections
+  private restriction: TwelveDataRestriction = null;
+  private lastPriceAt: Date | null = null;
 
   constructor(private readonly eventEmitter: EventEmitter2) {}
 
@@ -78,6 +83,22 @@ export class TwelveDataWebSocketService implements OnModuleInit, OnModuleDestroy
     return this.lastHeartbeat;
   }
 
+  getRestriction(): string | null {
+    return this.restriction;
+  }
+
+  getLastPriceAt(): Date | null {
+    return this.lastPriceAt;
+  }
+
+  getFeedState(): ForexConnectionState {
+    if (this.restriction) return 'HISTORICAL_ONLY';
+    if (this.connectionState === 'CONNECTING') return 'CONNECTING';
+    if (this.connectionState === 'CONNECTED') return 'CONNECTED';
+    if (this.connectionState === 'ERROR') return 'ERROR';
+    return 'DISCONNECTED';
+  }
+
   /**
    * Subscribe to real-time price updates for a symbol
    */
@@ -87,6 +108,7 @@ export class TwelveDataWebSocketService implements OnModuleInit, OnModuleDestroy
     }
 
     const normalizedSymbol = this.normalizeSymbol(symbol);
+    this.restriction = null;
     
     // Check if already subscribed or pending
     const existing = this.subscriptions.get(normalizedSymbol);
@@ -314,7 +336,7 @@ export class TwelveDataWebSocketService implements OnModuleInit, OnModuleDestroy
       // Handle different message types
       if (message.event === 'subscribe-status') {
         this.handleSubscribeStatus(message);
-      } else if (message.event === 'price') {
+      } else if (message.event === 'price' || (message.symbol && message.price !== undefined && message.timestamp)) {
         this.handlePriceUpdate(message);
       } else if (message.event === 'heartbeat') {
         this.handleHeartbeatMessage();
@@ -326,22 +348,46 @@ export class TwelveDataWebSocketService implements OnModuleInit, OnModuleDestroy
     }
   }
 
-  private handleSubscribeStatus(message: TwelveDataMessage): void {
-    const symbol = message.symbol;
-    const status = message.status;
+  private handleSubscribeStatus(message: TwelveDataMessage & { fails?: Array<{ symbol?: string; message?: string }>; success?: unknown[] }): void {
+    const failureText = [
+      message.message,
+      ...(Array.isArray(message.fails) ? message.fails.map((fail) => fail?.message).filter(Boolean) : []),
+    ].filter(Boolean).join(' ');
+    const restricted = /plan|upgrade|not allowed|subscribe|websocket|permission|exclusive/i.test(failureText)
+      && /error|fail|denied|not allowed|upgrade/i.test(`${message.status} ${failureText}`);
 
-    if (!symbol) return;
+    if (message.status && message.status !== 'ok' && restricted) {
+      this.restriction = failureText || 'Twelve Data WebSocket access is restricted on the configured account plan.';
+      this.logger.warn(`Twelve Data WebSocket restriction: ${this.restriction}`);
+      this.eventEmitter.emit('market.websocket.restricted', {
+        provider: 'TWELVE_DATA',
+        restriction: this.restriction,
+      });
+    }
 
-    const subscription = this.subscriptions.get(symbol);
-    if (!subscription) return;
+    const symbol = message.symbol ? this.normalizeSymbol(message.symbol) : undefined;
+    if (symbol) {
+      const subscription = this.subscriptions.get(symbol);
+      if (subscription) {
+        if (message.status === 'ok') {
+          subscription.status = 'SUBSCRIBED';
+          subscription.subscribedAt = new Date();
+          this.logger.log(`✅ Subscribed to ${symbol}`);
+        } else {
+          subscription.status = 'FAILED';
+          this.logger.warn(`❌ Subscription failed for ${symbol}: ${message.message || 'Unknown error'}`);
+        }
+      }
+    }
 
-    if (status === 'ok') {
-      subscription.status = 'SUBSCRIBED';
-      subscription.subscribedAt = new Date();
-      this.logger.log(`✅ Subscribed to ${symbol}`);
-    } else {
-      subscription.status = 'FAILED';
-      this.logger.warn(`❌ Subscription failed for ${symbol}: ${message.message || 'Unknown error'}`);
+    if (Array.isArray(message.fails)) {
+      for (const fail of message.fails) {
+        if (!fail?.symbol) continue;
+        const failedSymbol = this.normalizeSymbol(fail.symbol);
+        const subscription = this.subscriptions.get(failedSymbol);
+        if (subscription) subscription.status = 'FAILED';
+        this.logger.warn(`❌ Subscription failed for ${failedSymbol}: ${fail.message || message.message || 'Unknown error'}`);
+      }
     }
   }
 
@@ -355,7 +401,8 @@ export class TwelveDataWebSocketService implements OnModuleInit, OnModuleDestroy
       return;
     }
 
-    const subscription = this.subscriptions.get(symbol);
+    const providerSymbol = this.normalizeSymbol(symbol);
+    const subscription = this.subscriptions.get(providerSymbol) || this.subscriptions.get(symbol);
     if (!subscription) {
       this.logger.warn(`Received price for unsubscribed symbol: ${symbol}`);
       return;
@@ -364,28 +411,48 @@ export class TwelveDataWebSocketService implements OnModuleInit, OnModuleDestroy
     // Parse price
     const parsedPrice = typeof price === 'number' ? price : parseFloat(String(price));
     if (!Number.isFinite(parsedPrice) || parsedPrice <= 0) {
-      this.logger.warn(`Invalid price for ${symbol}: ${price}`);
+      this.logger.warn(`Invalid price for ${providerSymbol}: ${price}`);
       return;
     }
 
-    // Parse timestamp (Twelve Data sends Unix timestamp in seconds)
-    const providerTimestamp = new Date(timestamp * 1000);
+    const timestampNumber = Number(timestamp);
+    const providerTimestamp = new Date(Math.abs(timestampNumber) < 1_000_000_000_000 ? timestampNumber * 1000 : timestampNumber);
+    if (Number.isNaN(providerTimestamp.getTime())) {
+      this.logger.warn(`Invalid provider timestamp for ${providerSymbol}: ${timestamp}`);
+      return;
+    }
     const serverReceivedTimestamp = new Date();
 
-    // Update subscription
     subscription.lastUpdate = serverReceivedTimestamp;
+    this.lastPriceAt = serverReceivedTimestamp;
+    this.restriction = null;
 
-    // Create update object
     const update: TwelveDataPriceUpdate = {
-      symbol,
+      symbol: compactForexSymbol(providerSymbol),
       price: parsedPrice,
       providerTimestamp,
       serverReceivedTimestamp,
     };
 
-    // Log the update
-    const latency = serverReceivedTimestamp.getTime() - providerTimestamp.getTime();
-    this.logger.debug(`📊 ${symbol}: $${parsedPrice.toFixed(5)} (latency: ${latency}ms)`);
+    // ✅ FIXED: Calculate event age, not network latency
+    // Twelve Data sends minute-rounded timestamps, so this measures:
+    // - How old the provider event timestamp is (NOT network delay)
+    // - Increases from 0-60s within each minute (expected behavior)
+    const eventAgeMs = serverReceivedTimestamp.getTime() - providerTimestamp.getTime();
+    const eventAgeSeconds = Math.floor(eventAgeMs / 1000);
+
+    // Only log if event is suspiciously old (> 90 seconds = possible stale data)
+    if (eventAgeSeconds > 90) {
+      this.logger.warn(
+        `📊 ${symbol}: $${parsedPrice.toFixed(5)} ` +
+        `(provider event ${eventAgeSeconds}s old - possible stale data)`,
+      );
+    } else {
+      this.logger.debug(
+        `📊 ${symbol}: $${parsedPrice.toFixed(5)} ` +
+        `(provider: ${providerTimestamp.toISOString()}, received: ${serverReceivedTimestamp.toISOString()})`,
+      );
+    }
 
     // Emit event for other services to consume
     this.eventEmitter.emit('market.price.update', update);
@@ -525,21 +592,6 @@ export class TwelveDataWebSocketService implements OnModuleInit, OnModuleDestroy
   }
 
   private normalizeSymbol(symbol: string): string {
-    // Convert common formats to Twelve Data format
-    // EURUSD -> EUR/USD
-    const symbolMap: Record<string, string> = {
-      'EURUSD': 'EUR/USD',
-      'GBPUSD': 'GBP/USD',
-      'USDJPY': 'USD/JPY',
-      'AUDUSD': 'AUD/USD',
-      'USDCAD': 'USD/CAD',
-      'BTCUSD': 'BTC/USD',
-      'ETHUSD': 'ETH/USD',
-      'XAUUSD': 'XAU/USD',
-      'XAGUSD': 'XAG/USD',
-    };
-
-    const compact = symbol.trim().toUpperCase().replace(/[\/_]/g, '');
-    return symbolMap[compact] || symbol.trim();
+    return providerForexSymbol(symbol);
   }
 }

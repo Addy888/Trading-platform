@@ -9,6 +9,8 @@ import {
   OnModuleInit,
   ServiceUnavailableException,
   UnauthorizedException,
+  Inject,
+  forwardRef,
 } from '@nestjs/common';
 import {
   TwelveDataApiError,
@@ -16,6 +18,7 @@ import {
   TwelveDataErrorCategory,
   TwelveDataProvider,
 } from './providers/twelve-data/twelve-data.provider';
+import { TwelveDataWebSocketService } from './providers/twelve-data/twelve-data-websocket.service';
 
 export enum ProviderType {
   TWELVE_DATA = 'TWELVE_DATA',
@@ -47,7 +50,12 @@ export class MarketDataManagerService implements OnModuleInit {
   private readonly pollingIntervalMs = Math.max(900_000, readPositiveSetting('MARKET_DATA_POLLING_INTERVAL', 900_000));
   private readonly staleThresholdMs = Math.max(this.pollingIntervalMs, readPositiveSetting('MARKET_DATA_STALE_THRESHOLD_MS', 1_200_000));
   private readonly quoteTtl = Math.max(this.pollingIntervalMs, readPositiveSetting('MARKET_DATA_QUOTE_CACHE_TTL', 900_000));
-  private readonly candleTtl = Math.max(1_000, readPositiveSetting('MARKET_DATA_CANDLE_CACHE_TTL', 300_000));
+  // ✅ FIX RATE LIMITS: Longer cache for historical candles (5 minutes default)
+  // Historical data doesn't change often, safe to cache longer
+  private readonly candleTtl = Math.max(10_000, readPositiveSetting('MARKET_DATA_CANDLE_CACHE_TTL', 300_000));
+  // ✅ FIX RATE LIMITS: Add request throttling
+  private lastRequestTime = 0;
+  private readonly minRequestIntervalMs = readPositiveSetting('TWELVE_DATA_MIN_REQUEST_INTERVAL_MS', 8_000); // 8s = ~7.5 req/min (safe for free tier 8 req/min)
 
   private status: ProviderStatus;
   private quoteStatus: ProviderStatus;
@@ -62,7 +70,11 @@ export class MarketDataManagerService implements OnModuleInit {
   private directoryLastError: string | null = null;
   private retryAfter = 0;
 
-  constructor(private readonly provider: TwelveDataProvider) {
+  constructor(
+    private readonly provider: TwelveDataProvider,
+    @Inject(forwardRef(() => TwelveDataWebSocketService))
+    private readonly websocketService: any,
+  ) {
     this.status = this.quoteStatus = provider.isConfigured() ? ProviderStatus.UNVERIFIED : ProviderStatus.DISABLED;
     if (!provider.isConfigured()) {
       this.setError(
@@ -91,6 +103,25 @@ export class MarketDataManagerService implements OnModuleInit {
       staleThresholdMs: this.staleThresholdMs,
     };
 
+    // ✅ FIX WEBSOCKET STATUS: Get actual WebSocket connection state
+    let websocketState = 'DISCONNECTED';
+    let websocketRestriction: string | null = null;
+    let websocketLastPriceAt: string | null = null;
+    
+    if (this.websocketService) {
+      try {
+        const wsConnectionState = this.websocketService.getConnectionState();
+        const wsRestriction = this.websocketService.getRestriction();
+        const wsLastPriceAt = this.websocketService.getLastPriceAt();
+        
+        websocketState = wsConnectionState || 'DISCONNECTED';
+        websocketRestriction = wsRestriction;
+        websocketLastPriceAt = wsLastPriceAt ? wsLastPriceAt.toISOString() : null;
+      } catch (err) {
+        this.logger.debug('Could not get WebSocket status:', err);
+      }
+    }
+
     return {
       primaryProvider: ProviderType.TWELVE_DATA,
       configuration,
@@ -98,6 +129,10 @@ export class MarketDataManagerService implements OnModuleInit {
       lastUpdateAt: this.lastUpdateAt,
       candleLastSuccessAt: this.candleLastSuccessAt,
       quoteLastSuccessAt: this.quoteLastSuccessAt,
+      // ✅ FIX WEBSOCKET STATUS: Include actual WebSocket connection state
+      websocketConnectionState: websocketState,
+      websocketRestriction,
+      websocketLastPriceAt,
       providers: {
         TWELVE_DATA: {
           status: this.status,
@@ -115,7 +150,10 @@ export class MarketDataManagerService implements OnModuleInit {
           quoteLastSuccessAt: this.quoteLastSuccessAt,
           directoryLastSuccessAt: this.directoryLastSuccessAt,
           directoryLastError: this.directoryLastError,
-          streamingMode: 'POLLING',
+          streamingMode: websocketState === 'CONNECTED' ? 'WEBSOCKET' : 'POLLING',
+          websocketConnectionState: websocketState,
+          websocketRestriction,
+          websocketLastPriceAt,
         },
       },
       quoteCacheSize: this.quotes.size,
@@ -196,26 +234,76 @@ export class MarketDataManagerService implements OnModuleInit {
       throw this.toHttp(new TwelveDataApiError(this.errorCategory || 'NOT_CONFIGURED', this.lastError || 'Twelve Data unavailable.'));
     }
 
+    // ✅ FIX RATE LIMITS: Return cached data if available and valid
     const hit = cache.get(key);
-    if (hit && Date.now() - hit.timestamp < ttl) return hit.data;
+    if (hit && Date.now() - hit.timestamp < ttl) {
+      this.logger.debug(`[Cache HIT] ${key} (age: ${Math.floor((Date.now() - hit.timestamp) / 1000)}s, ttl: ${Math.floor(ttl / 1000)}s)`);
+      return hit.data;
+    }
 
+    // ✅ FIX RATE LIMITS: Check global rate limit with retry-after
     if (this.retryAfter > Date.now()) {
+      const waitMs = this.retryAfter - Date.now();
+      this.logger.warn(`[Rate Limited] Must wait ${Math.ceil(waitMs / 1000)}s before next request`);
+      
+      // If we have stale cache data, return it instead of throwing
+      if (hit) {
+        this.logger.warn(`[Rate Limited] Returning stale cached data for ${key} (age: ${Math.floor((Date.now() - hit.timestamp) / 1000)}s)`);
+        return hit.data;
+      }
+      
       throw this.toHttp(
-        new TwelveDataApiError('RATE_LIMITED', 'Twelve Data rate limited the request.', this.retryAfter - Date.now()),
+        new TwelveDataApiError('RATE_LIMITED', 'Twelve Data rate limited the request.', waitMs),
       );
     }
 
+    // ✅ FIX RATE LIMITS: Deduplicate in-flight requests
     const existing = this.pending.get(key);
-    if (existing) return existing as Promise<T>;
+    if (existing) {
+      this.logger.debug(`[In-Flight] Reusing pending request for ${key}`);
+      return existing as Promise<T>;
+    }
+
+    // ✅ FIX RATE LIMITS: Throttle requests to prevent exceeding provider limits
+    const now = Date.now();
+    const timeSinceLastRequest = now - this.lastRequestTime;
+    if (timeSinceLastRequest < this.minRequestIntervalMs) {
+      const waitMs = this.minRequestIntervalMs - timeSinceLastRequest;
+      this.logger.debug(`[Throttle] Waiting ${waitMs}ms before next provider request`);
+      await new Promise(resolve => setTimeout(resolve, waitMs));
+    }
+
+    // Update last request time
+    this.lastRequestTime = Date.now();
 
     const request = action()
       .then((data) => {
+        // ✅ FIX RATE LIMITS: Store in cache with timestamp
         cache.set(key, { data, timestamp: Date.now() });
+        
+        // ✅ FIX RATE LIMITS: Limit cache size to prevent memory issues
+        if (cache.size > 1000) {
+          const oldestKey = cache.keys().next().value;
+          if (oldestKey) {
+            cache.delete(oldestKey);
+            this.logger.debug(`[Cache] Evicted oldest entry: ${oldestKey}`);
+          }
+        }
+        
+        this.logger.debug(`[Cache SET] ${key}`);
         this.setSuccess(capability);
         return data;
       })
       .catch((error: unknown) => {
         this.setError(error, capability);
+        
+        // ✅ FIX RATE LIMITS: On rate limit, check if we have stale data to return
+        if (error instanceof TwelveDataApiError && error.category === 'RATE_LIMITED' && hit) {
+          this.logger.warn(`[Rate Limited] Returning stale cached data for ${key} (age: ${Math.floor((Date.now() - hit.timestamp) / 1000)}s)`);
+          // Don't delete from cache, return stale data
+          return hit.data;
+        }
+        
         throw this.toHttp(error);
       })
       .finally(() => this.pending.delete(key));

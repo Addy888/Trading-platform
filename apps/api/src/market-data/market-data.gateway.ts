@@ -12,18 +12,31 @@ import { Server, Socket } from 'socket.io';
 import { OnEvent } from '@nestjs/event-emitter';
 import { WebSocketAuthService } from '../websocket/websocket-auth.service';
 import { TwelveDataWebSocketService, TwelveDataPriceUpdate } from './providers/twelve-data/twelve-data-websocket.service';
+import { compactForexSymbol, displayForexSymbol, marketRoomName } from './forex-symbols';
+import { ForexCandleUpdate } from './forex-feed.interface';
+
+const socketCorsOrigins = process.env.CORS_ORIGINS
+  ?.split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean) || ['http://localhost:3000'];
 
 interface ClientSubscription {
   userId: string;
   symbols: Set<string>;
 }
 
-@WebSocketGateway({ namespace: '/trading', cors: { origin: '*' } })
+@WebSocketGateway({
+  namespace: '/trading',
+  cors: { origin: socketCorsOrigins, credentials: true },
+  maxHttpBufferSize: 1e6,
+  pingInterval: 25000,
+  pingTimeout: 60000,
+})
 export class MarketDataGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer() server: Server;
   private readonly logger = new Logger(MarketDataGateway.name);
   private readonly clientSubscriptions = new Map<string, ClientSubscription>();
-  private readonly symbolSubscribers = new Map<string, Set<string>>(); // symbol -> Set<clientId>
+  private readonly symbolSubscribers = new Map<string, Set<string>>();
 
   constructor(
     private readonly twelveDataWs: TwelveDataWebSocketService,
@@ -43,34 +56,20 @@ export class MarketDataGateway implements OnGatewayConnection, OnGatewayDisconne
   async handleSubscribe(
     @ConnectedSocket() client: Socket,
     @MessageBody() data: { symbols: string[] },
-  ): Promise<{ success: boolean; subscribed: string[]; errors?: string[] }> {
-    // Authenticate the client - authenticateSocket throws if invalid
+  ): Promise<{ success: boolean; subscribed: string[]; errors?: string[]; restriction?: string | null; connectionState: string }> {
     try {
       const user = await this.wsAuth.authenticateSocket(client);
-      
       const symbols = data.symbols || [];
-      
       if (symbols.length === 0) {
-        return { success: false, subscribed: [], errors: ['No symbols provided'] };
+        return { success: false, subscribed: [], errors: ['No symbols provided'], connectionState: this.twelveDataWs.getFeedState() };
+      }
+      if (symbols.length > 10) {
+        return { success: false, subscribed: [], errors: ['Maximum 10 symbols per client'], connectionState: this.twelveDataWs.getFeedState() };
       }
 
-      // Limit subscriptions per client
-      const maxSymbolsPerClient = 10;
-      if (symbols.length > maxSymbolsPerClient) {
-        return {
-          success: false,
-          subscribed: [],
-          errors: [`Maximum ${maxSymbolsPerClient} symbols per client`],
-        };
-      }
-
-      // Get or create client subscription
       let clientSub = this.clientSubscriptions.get(client.id);
       if (!clientSub) {
-        clientSub = {
-          userId: user.userId,
-          symbols: new Set<string>(),
-        };
+        clientSub = { userId: user.userId, symbols: new Set<string>() };
         this.clientSubscriptions.set(client.id, clientSub);
       }
 
@@ -79,45 +78,34 @@ export class MarketDataGateway implements OnGatewayConnection, OnGatewayDisconne
 
       for (const symbol of symbols) {
         try {
-          const normalizedSymbol = symbol.trim().toUpperCase();
-          
-          // Add to client's subscriptions
-          clientSub.symbols.add(normalizedSymbol);
-
-          // Track which clients are subscribed to this symbol
-          let subscribers = this.symbolSubscribers.get(normalizedSymbol);
+          const compact = compactForexSymbol(symbol);
+          clientSub.symbols.add(compact);
+          let subscribers = this.symbolSubscribers.get(compact);
           if (!subscribers) {
             subscribers = new Set<string>();
-            this.symbolSubscribers.set(normalizedSymbol, subscribers);
+            this.symbolSubscribers.set(compact, subscribers);
           }
           subscribers.add(client.id);
-
-          // Subscribe to Twelve Data WebSocket if this is the first client for this symbol
           if (subscribers.size === 1) {
-            await this.twelveDataWs.subscribe(normalizedSymbol);
+            await this.twelveDataWs.subscribe(compact);
           }
-
-          subscribed.push(normalizedSymbol);
-          this.logger.debug(`Client ${client.id} subscribed to ${normalizedSymbol}`);
+          client.join(marketRoomName(compact));
+          subscribed.push(compact);
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
           errors.push(`${symbol}: ${message}`);
-          this.logger.error(`Failed to subscribe ${client.id} to ${symbol}`, message);
         }
-      }
-
-      // Join Socket.IO room for each symbol
-      for (const symbol of subscribed) {
-        client.join(`market:${symbol}`);
       }
 
       return {
         success: subscribed.length > 0,
         subscribed,
         errors: errors.length > 0 ? errors : undefined,
+        restriction: this.twelveDataWs.getRestriction(),
+        connectionState: this.twelveDataWs.getFeedState(),
       };
-    } catch (error) {
-      return { success: false, subscribed: [], errors: ['Authentication required'] };
+    } catch {
+      return { success: false, subscribed: [], errors: ['Authentication required'], connectionState: 'ERROR' };
     }
   }
 
@@ -126,54 +114,36 @@ export class MarketDataGateway implements OnGatewayConnection, OnGatewayDisconne
     @ConnectedSocket() client: Socket,
     @MessageBody() data: { symbols: string[] },
   ): Promise<{ success: boolean; unsubscribed: string[] }> {
-    const symbols = data.symbols || [];
     const unsubscribed: string[] = [];
-
     const clientSub = this.clientSubscriptions.get(client.id);
-    if (!clientSub) {
-      return { success: true, unsubscribed: [] };
-    }
+    if (!clientSub) return { success: true, unsubscribed: [] };
 
-    for (const symbol of symbols) {
-      const normalizedSymbol = symbol.trim().toUpperCase();
-      
-      // Remove from client's subscriptions
-      clientSub.symbols.delete(normalizedSymbol);
-
-      // Remove client from symbol's subscribers
-      const subscribers = this.symbolSubscribers.get(normalizedSymbol);
+    for (const symbol of data.symbols || []) {
+      const compact = compactForexSymbol(symbol);
+      clientSub.symbols.delete(compact);
+      const subscribers = this.symbolSubscribers.get(compact);
       if (subscribers) {
         subscribers.delete(client.id);
-
-        // Unsubscribe from Twelve Data if no more clients need this symbol
         if (subscribers.size === 0) {
-          this.symbolSubscribers.delete(normalizedSymbol);
-          await this.twelveDataWs.unsubscribe(normalizedSymbol);
+          this.symbolSubscribers.delete(compact);
+          await this.twelveDataWs.unsubscribe(compact);
         }
       }
-
-      // Leave Socket.IO room
-      client.leave(`market:${normalizedSymbol}`);
-      unsubscribed.push(normalizedSymbol);
+      client.leave(marketRoomName(compact));
+      unsubscribed.push(compact);
     }
-
     return { success: true, unsubscribed };
   }
 
   @SubscribeMessage('market:unsubscribe:all')
   handleUnsubscribeAll(@ConnectedSocket() client: Socket): { success: boolean } {
     const clientSub = this.clientSubscriptions.get(client.id);
-    if (!clientSub) {
-      return { success: true };
-    }
+    if (!clientSub) return { success: true };
 
-    // Unsubscribe from all symbols
-    const symbols = Array.from(clientSub.symbols);
-    for (const symbol of symbols) {
+    for (const symbol of Array.from(clientSub.symbols)) {
       const subscribers = this.symbolSubscribers.get(symbol);
       if (subscribers) {
         subscribers.delete(client.id);
-
         if (subscribers.size === 0) {
           this.symbolSubscribers.delete(symbol);
           this.twelveDataWs.unsubscribe(symbol).catch((error) => {
@@ -181,54 +151,63 @@ export class MarketDataGateway implements OnGatewayConnection, OnGatewayDisconne
           });
         }
       }
-
-      client.leave(`market:${symbol}`);
+      client.leave(marketRoomName(symbol));
     }
-
     this.clientSubscriptions.delete(client.id);
     return { success: true };
   }
 
   @SubscribeMessage('market:status')
-  async handleStatus(@ConnectedSocket() client: Socket): Promise<{
-    connectionState: string;
-    subscriptions: string[];
-    lastHeartbeat: string | null;
-    authenticated: boolean;
-  }> {
-    const clientSub = this.clientSubscriptions.get(client.id);
-    const connectionState = this.twelveDataWs.getConnectionState();
+  async handleStatus() {
     const lastHeartbeat = this.twelveDataWs.getLastHeartbeat();
-    const authenticated = !!this.wsAuth.getUserId(client);
-
+    const lastPriceAt = this.twelveDataWs.getLastPriceAt();
+    const now = Date.now();
+    
+    // Calculate staleness
+    let dataFreshness: 'FRESH' | 'RECENT' | 'STALE' | 'NONE' = 'NONE';
+    let dataAgeSeconds = 0;
+    
+    if (lastPriceAt) {
+      dataAgeSeconds = Math.floor((now - lastPriceAt.getTime()) / 1000);
+      if (dataAgeSeconds < 60) {
+        dataFreshness = 'FRESH';
+      } else if (dataAgeSeconds < 120) {
+        dataFreshness = 'RECENT';
+      } else {
+        dataFreshness = 'STALE';
+      }
+    }
+    
     return {
-      connectionState,
-      subscriptions: clientSub ? Array.from(clientSub.symbols) : [],
+      connectionState: this.twelveDataWs.getFeedState(),
+      providerState: this.twelveDataWs.getConnectionState(),
+      restriction: this.twelveDataWs.getRestriction(),
       lastHeartbeat: lastHeartbeat?.toISOString() || null,
-      authenticated,
+      lastPriceAt: lastPriceAt?.toISOString() || null,
+      dataFreshness,
+      dataAgeSeconds,
+      provider: 'TWELVE_DATA',
+      note: 'Twelve Data timestamps are minute-rounded; dataAgeSeconds measures time since last update, not network latency',
     };
   }
 
-  /**
-   * Listen for price updates from Twelve Data WebSocket and broadcast to subscribed clients
-   */
   @OnEvent('market.price.update')
   handlePriceUpdate(update: TwelveDataPriceUpdate) {
-    const { symbol, price, providerTimestamp, serverReceivedTimestamp } = update;
-
-    // Broadcast to all clients subscribed to this symbol
-    this.server.to(`market:${symbol}`).emit('market:price', {
-      symbol,
-      price,
-      providerTimestamp: providerTimestamp.toISOString(),
-      serverReceivedTimestamp: serverReceivedTimestamp.toISOString(),
+    const compact = compactForexSymbol(update.symbol);
+    this.server.to(marketRoomName(compact)).emit('market:price', {
+      symbol: compact,
+      displaySymbol: displayForexSymbol(compact),
+      price: update.price,
+      providerTimestamp: update.providerTimestamp.toISOString(),
+      serverReceivedTimestamp: update.serverReceivedTimestamp.toISOString(),
       feedMode: 'WEBSOCKET',
       provider: 'TWELVE_DATA',
     });
+  }
 
-    // Log broadcast
-    const subscriberCount = this.symbolSubscribers.get(symbol)?.size || 0;
-    this.logger.debug(`📡 Broadcasted ${symbol} price to ${subscriberCount} clients`);
+  @OnEvent('market.candle.update')
+  handleCandleUpdate(update: ForexCandleUpdate) {
+    this.server.to(marketRoomName(update.symbol)).emit('market:candle', update);
   }
 
   @OnEvent('market.websocket.connected')
@@ -237,8 +216,8 @@ export class MarketDataGateway implements OnGatewayConnection, OnGatewayDisconne
       status: 'CONNECTED',
       provider: data.provider,
       connectedAt: data.connectedAt.toISOString(),
+      restriction: this.twelveDataWs.getRestriction(),
     });
-    this.logger.log('Broadcasting WebSocket connected status to all clients');
   }
 
   @OnEvent('market.websocket.disconnected')
@@ -249,7 +228,16 @@ export class MarketDataGateway implements OnGatewayConnection, OnGatewayDisconne
       disconnectedAt: data.disconnectedAt.toISOString(),
       code: data.code,
       reason: data.reason,
+      restriction: this.twelveDataWs.getRestriction(),
     });
-    this.logger.log('Broadcasting WebSocket disconnected status to all clients');
+  }
+
+  @OnEvent('market.websocket.restricted')
+  handleRestricted(data: { provider: string; restriction: string }) {
+    this.server.emit('market:connection', {
+      status: 'HISTORICAL_ONLY',
+      provider: data.provider,
+      restriction: data.restriction,
+    });
   }
 }

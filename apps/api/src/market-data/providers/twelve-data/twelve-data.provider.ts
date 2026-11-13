@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import Decimal from 'decimal.js';
+import { sanitizeCandles } from '../../candle-sanitize';
 
 export type TwelveDataErrorCategory =
   | 'NOT_CONFIGURED'
@@ -110,12 +111,18 @@ export class TwelveDataProvider {
   }
 
   getConfigurationStatus() {
+    // ✅ FIX WEBSOCKET STATUS: Check if WebSocket API key is configured
+    // Even if we have API key, WebSocket might be restricted by plan
+    const wsConfigured = Boolean(this.apiKey);
+    
     return {
       configured: this.isConfigured(),
       missingVariables: this.apiKey ? [] : ['TWELVE_DATA_API_KEY'],
       apiBaseUrl: this.baseUrl,
-      streamingConfigured: false,
-      streamingMode: 'POLLING' as const,
+      // ✅ TRUTHFUL REPORTING: WebSocket is configured if API key exists
+      // Actual connection status is tracked separately by WebSocketService
+      streamingConfigured: wsConfigured,
+      streamingMode: 'POLLING' as const, // Default mode for historical data
     };
   }
 
@@ -261,42 +268,53 @@ export class TwelveDataProvider {
           ? parsedVolume
           : undefined,
       };
-    }).sort((left, right) => left.timestamp.getTime() - right.timestamp.getTime());
+    });
 
-    if (candles.length === 0) {
+    const sanitized = sanitizeCandles(candles.map((candle) => ({
+      timestamp: candle.timestamp,
+      open: candle.open.toNumber(),
+      high: candle.high.toNumber(),
+      low: candle.low.toNumber(),
+      close: candle.close.toNumber(),
+      volume: candle.volume,
+    })));
+    const ordered = sanitized.candles.map((candle) => ({
+      timestamp: new Date(candle.time * 1000),
+      open: new Decimal(candle.open),
+      high: new Decimal(candle.high),
+      low: new Decimal(candle.low),
+      close: new Decimal(candle.close),
+      volume: candle.volume,
+    }));
+
+    if (ordered.length === 0) {
       throw new TwelveDataApiError('EMPTY_CANDLES', `Twelve Data returned no candles for ${normalized} (${providerInterval}).`);
-    }
-    
-    // ✅ Validate chronological order and no duplicate timestamps
-    if (candles.some((candle, index) =>
-      index > 0 && candle.timestamp.getTime() <= candles[index - 1].timestamp.getTime(),
-    )) {
-      throw new TwelveDataApiError('PROVIDER', `Twelve Data returned duplicate or out-of-order candle timestamps for ${normalized}.`);
     }
 
     // ✅ Diagnostic logging - sanitized sample data
-    this.logger.log(`[getTimeSeries] Processed ${candles.length} valid candles:`, {
+    this.logger.log(`[getTimeSeries] Processed ${ordered.length} valid candles:`, {
       symbol: normalized,
       interval: providerInterval,
-      first: candles[0] ? {
-        timestamp: candles[0].timestamp.toISOString(),
-        open: candles[0].open.toString(),
-        high: candles[0].high.toString(),
-        low: candles[0].low.toString(),
-        close: candles[0].close.toString(),
-        volume: candles[0].volume
+      dropped: sanitized.dropped,
+      first: ordered[0] ? {
+        timestamp: ordered[0].timestamp.toISOString(),
+        open: ordered[0].open.toString(),
+        high: ordered[0].high.toString(),
+        low: ordered[0].low.toString(),
+        close: ordered[0].close.toString(),
+        volume: ordered[0].volume
       } : null,
-      last: candles.length > 1 ? {
-        timestamp: candles[candles.length - 1].timestamp.toISOString(),
-        open: candles[candles.length - 1].open.toString(),
-        high: candles[candles.length - 1].high.toString(),
-        low: candles[candles.length - 1].low.toString(),
-        close: candles[candles.length - 1].close.toString(),
-        volume: candles[candles.length - 1].volume
+      last: ordered.length > 1 ? {
+        timestamp: ordered[ordered.length - 1].timestamp.toISOString(),
+        open: ordered[ordered.length - 1].open.toString(),
+        high: ordered[ordered.length - 1].high.toString(),
+        low: ordered[ordered.length - 1].low.toString(),
+        close: ordered[ordered.length - 1].close.toString(),
+        volume: ordered[ordered.length - 1].volume
       } : null
     });
 
-    return candles;
+    return ordered;
   }
 
   async getExchanges(): Promise<TwelveDataExchange[]> {

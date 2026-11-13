@@ -7,6 +7,7 @@ import { TwelveDataProvider } from './providers/twelve-data/twelve-data.provider
 import { TwelveDataWebSocketService } from './providers/twelve-data/twelve-data-websocket.service';
 import { MarketDataManagerService } from './market-data-manager.service';
 import { MarketDataGateway } from './market-data.gateway';
+import { CandleAggregatorService } from './candle-aggregator.service';
 import { WebSocketModule } from '../websocket/websocket.module';
 
 @Module({
@@ -20,6 +21,7 @@ import { WebSocketModule } from '../websocket/websocket.module';
     MarketPriceService,
     InstrumentConfigService,
     MarketDataGateway,
+    CandleAggregatorService,
   ],
   exports: [
     MarketPriceService,
@@ -28,6 +30,7 @@ import { WebSocketModule } from '../websocket/websocket.module';
     TwelveDataProvider,
     TwelveDataWebSocketService,
     MarketDataManagerService,
+    CandleAggregatorService,
   ],
 })
 export class MarketDataModule {}

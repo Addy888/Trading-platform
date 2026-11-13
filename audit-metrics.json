@@ -1,0 +1,521 @@
+{
+  "providerEvents": [
+    {
+      "symbol": "EUR/USD",
+      "price": 1.1056,
+      "providerTimestamp": "2026-11-12T17:02:00.000Z",
+      "providerTimestampMs": 1794502920000,
+      "receiveTimestamp": "2026-11-12T17:02:21.920Z",
+      "receiveTimestampMs": 1794502941920,
+      "networkLatency": 21920,
+      "eventAge": 21920,
+      "elapsedSinceStart": 2093
+    },
+    {
+      "symbol": "EUR/USD",
+      "price": 1.1056,
+      "providerTimestamp": "2026-11-12T17:02:00.000Z",
+      "providerTimestampMs": 1794502920000,
+      "receiveTimestamp": "2026-11-12T17:02:24.175Z",
+      "receiveTimestampMs": 1794502944175,
+      "networkLatency": 24175,
+      "eventAge": 24175,
+      "elapsedSinceStart": 4348
+    },
+    {
+      "symbol": "EUR/USD",
+      "price": 1.10562,
+      "providerTimestamp": "2026-11-12T17:02:00.000Z",
+      "providerTimestampMs": 1794502920000,
+      "receiveTimestamp": "2026-11-12T17:02:25.680Z",
+      "receiveTimestampMs": 1794502945680,
+      "networkLatency": 25680,
+      "eventAge": 25680,
+      "elapsedSinceStart": 5853
+    },
+    {
+      "symbol": "EUR/USD",
+      "price": 1.10561,
+      "providerTimestamp": "2026-11-12T17:02:00.000Z",
+      "providerTimestampMs": 1794502920000,
+      "receiveTimestamp": "2026-11-12T17:02:27.343Z",
+      "receiveTimestampMs": 1794502947343,
+      "networkLatency": 27343,
+      "eventAge": 27343,
+      "elapsedSinceStart": 7516
+    },
+    {
+      "symbol": "EUR/USD",
+      "price": 1.10562,
+      "providerTimestamp": "2026-11-12T17:02:00.000Z",
+      "providerTimestampMs": 1794502920000,
+      "receiveTimestamp": "2026-11-12T17:02:28.755Z",
+      "receiveTimestampMs": 1794502948755,
+      "networkLatency": 28755,
+      "eventAge": 28755,
+      "elapsedSinceStart": 8928
+    },
+    {
+      "symbol": "EUR/USD",
+      "price": 1.10563,
+      "providerTimestamp": "2026-11-12T17:02:00.000Z",
+      "providerTimestampMs": 1794502920000,
+      "receiveTimestamp": "2026-11-12T17:02:29.714Z",
+      "receiveTimestampMs": 1794502949714,
+      "networkLatency": 29714,
+      "eventAge": 29714,
+      "elapsedSinceStart": 9887
+    },
+    {
+      "symbol": "EUR/USD",
+      "price": 1.10563,
+      "providerTimestamp": "2026-11-12T17:02:00.000Z",
+      "providerTimestampMs": 1794502920000,
+      "receiveTimestamp": "2026-11-12T17:02:32.702Z",
+      "receiveTimestampMs": 1794502952702,
+      "networkLatency": 32702,
+      "eventAge": 32702,
+      "elapsedSinceStart": 12875
+    },
+    {
+      "symbol": "EUR/USD",
+      "price": 1.10563,
+      "providerTimestamp": "2026-11-12T17:02:00.000Z",
+      "providerTimestampMs": 1794502920000,
+      "receiveTimestamp": "2026-11-12T17:02:34.106Z",
+      "receiveTimestampMs": 1794502954106,
+      "networkLatency": 34106,
+      "eventAge": 34106,
+      "elapsedSinceStart": 14279
+    },
+    {
+      "symbol": "EUR/USD",
+      "price": 1.10563,
+      "providerTimestamp": "2026-11-12T17:02:00.000Z",
+      "providerTimestampMs": 1794502920000,
+      "receiveTimestamp": "2026-11-12T17:02:35.867Z",
+      "receiveTimestampMs": 1794502955867,
+      "networkLatency": 35867,
+      "eventAge": 35867,
+      "elapsedSinceStart": 16040
+    },
+    {
+      "symbol": "EUR/USD",
+      "price": 1.10562,
+      "providerTimestamp": "2026-11-12T17:02:00.000Z",
+      "providerTimestampMs": 1794502920000,
+      "receiveTimestamp": "2026-11-12T17:02:37.707Z",
+      "receiveTimestampMs": 1794502957707,
+      "networkLatency": 37707,
+      "eventAge": 37707,
+      "elapsedSinceStart": 17880
+    },
+    {
+      "symbol": "EUR/USD",
+      "price": 1.10562,
+      "providerTimestamp": "2026-11-12T17:02:00.000Z",
+      "providerTimestampMs": 1794502920000,
+      "receiveTimestamp": "2026-11-12T17:02:39.689Z",
+      "receiveTimestampMs": 1794502959689,
+      "networkLatency": 39689,
+      "eventAge": 39689,
+      "elapsedSinceStart": 19862
+    },
+    {
+      "symbol": "EUR/USD",
+      "price": 1.10561,
+      "providerTimestamp": "2026-11-12T17:02:00.000Z",
+      "providerTimestampMs": 1794502920000,
+      "receiveTimestamp": "2026-11-12T17:02:40.687Z",
+      "receiveTimestampMs": 1794502960687,
+      "networkLatency": 40687,
+      "eventAge": 40687,
+      "elapsedSinceStart": 20860
+    },
+    {
+      "symbol": "EUR/USD",
+      "price": 1.10563,
+      "providerTimestamp": "2026-11-12T17:02:00.000Z",
+      "providerTimestampMs": 1794502920000,
+      "receiveTimestamp": "2026-11-12T17:02:44.458Z",
+      "receiveTimestampMs": 1794502964458,
+      "networkLatency": 44458,
+      "eventAge": 44458,
+      "elapsedSinceStart": 24631
+    },
+    {
+      "symbol": "EUR/USD",
+      "price": 1.10566,
+      "providerTimestamp": "2026-11-12T17:02:00.000Z",
+      "providerTimestampMs": 1794502920000,
+      "receiveTimestamp": "2026-11-12T17:02:45.689Z",
+      "receiveTimestampMs": 1794502965689,
+      "networkLatency": 45689,
+      "eventAge": 45689,
+      "elapsedSinceStart": 25862
+    },
+    {
+      "symbol": "EUR/USD",
+      "price": 1.10566,
+      "providerTimestamp": "2026-11-12T17:02:00.000Z",
+      "providerTimestampMs": 1794502920000,
+      "receiveTimestamp": "2026-11-12T17:02:46.600Z",
+      "receiveTimestampMs": 1794502966600,
+      "networkLatency": 46600,
+      "eventAge": 46600,
+      "elapsedSinceStart": 26773
+    },
+    {
+      "symbol": "EUR/USD",
+      "price": 1.10567,
+      "providerTimestamp": "2026-11-12T17:02:00.000Z",
+      "providerTimestampMs": 1794502920000,
+      "receiveTimestamp": "2026-11-12T17:02:48.802Z",
+      "receiveTimestampMs": 1794502968802,
+      "networkLatency": 48802,
+      "eventAge": 48802,
+      "elapsedSinceStart": 28975
+    },
+    {
+      "symbol": "EUR/USD",
+      "price": 1.10566,
+      "providerTimestamp": "2026-11-12T17:02:00.000Z",
+      "providerTimestampMs": 1794502920000,
+      "receiveTimestamp": "2026-11-12T17:02:50.806Z",
+      "receiveTimestampMs": 1794502970806,
+      "networkLatency": 50806,
+      "eventAge": 50806,
+      "elapsedSinceStart": 30979
+    },
+    {
+      "symbol": "EUR/USD",
+      "price": 1.10568,
+      "providerTimestamp": "2026-11-12T17:02:00.000Z",
+      "providerTimestampMs": 1794502920000,
+      "receiveTimestamp": "2026-11-12T17:02:52.663Z",
+      "receiveTimestampMs": 1794502972663,
+      "networkLatency": 52663,
+      "eventAge": 52663,
+      "elapsedSinceStart": 32836
+    },
+    {
+      "symbol": "EUR/USD",
+      "price": 1.10564,
+      "providerTimestamp": "2026-11-12T17:02:00.000Z",
+      "providerTimestampMs": 1794502920000,
+      "receiveTimestamp": "2026-11-12T17:02:55.733Z",
+      "receiveTimestampMs": 1794502975733,
+      "networkLatency": 55733,
+      "eventAge": 55733,
+      "elapsedSinceStart": 35906
+    },
+    {
+      "symbol": "EUR/USD",
+      "price": 1.10566,
+      "providerTimestamp": "2026-11-12T17:02:00.000Z",
+      "providerTimestampMs": 1794502920000,
+      "receiveTimestamp": "2026-11-12T17:02:58.601Z",
+      "receiveTimestampMs": 1794502978601,
+      "networkLatency": 58601,
+      "eventAge": 58601,
+      "elapsedSinceStart": 38774
+    },
+    {
+      "symbol": "EUR/USD",
+      "price": 1.10573,
+      "providerTimestamp": "2026-11-12T17:03:00.000Z",
+      "providerTimestampMs": 1794502980000,
+      "receiveTimestamp": "2026-11-12T17:03:03.627Z",
+      "receiveTimestampMs": 1794502983627,
+      "networkLatency": 3627,
+      "eventAge": 3627,
+      "elapsedSinceStart": 43800
+    },
+    {
+      "symbol": "EUR/USD",
+      "price": 1.10571,
+      "providerTimestamp": "2026-11-12T17:03:00.000Z",
+      "providerTimestampMs": 1794502980000,
+      "receiveTimestamp": "2026-11-12T17:03:06.545Z",
+      "receiveTimestampMs": 1794502986545,
+      "networkLatency": 6545,
+      "eventAge": 6545,
+      "elapsedSinceStart": 46718
+    },
+    {
+      "symbol": "EUR/USD",
+      "price": 1.10564,
+      "providerTimestamp": "2026-11-12T17:03:00.000Z",
+      "providerTimestampMs": 1794502980000,
+      "receiveTimestamp": "2026-11-12T17:03:07.815Z",
+      "receiveTimestampMs": 1794502987815,
+      "networkLatency": 7815,
+      "eventAge": 7815,
+      "elapsedSinceStart": 47988
+    },
+    {
+      "symbol": "EUR/USD",
+      "price": 1.10569,
+      "providerTimestamp": "2026-11-12T17:03:00.000Z",
+      "providerTimestampMs": 1794502980000,
+      "receiveTimestamp": "2026-11-12T17:03:10.980Z",
+      "receiveTimestampMs": 1794502990980,
+      "networkLatency": 10980,
+      "eventAge": 10980,
+      "elapsedSinceStart": 51153
+    },
+    {
+      "symbol": "EUR/USD",
+      "price": 1.10564,
+      "providerTimestamp": "2026-11-12T17:03:00.000Z",
+      "providerTimestampMs": 1794502980000,
+      "receiveTimestamp": "2026-11-12T17:03:12.157Z",
+      "receiveTimestampMs": 1794502992157,
+      "networkLatency": 12157,
+      "eventAge": 12157,
+      "elapsedSinceStart": 52330
+    },
+    {
+      "symbol": "EUR/USD",
+      "price": 1.10573,
+      "providerTimestamp": "2026-11-12T17:03:00.000Z",
+      "providerTimestampMs": 1794502980000,
+      "receiveTimestamp": "2026-11-12T17:03:12.993Z",
+      "receiveTimestampMs": 1794502992993,
+      "networkLatency": 12993,
+      "eventAge": 12993,
+      "elapsedSinceStart": 53166
+    },
+    {
+      "symbol": "EUR/USD",
+      "price": 1.10572,
+      "providerTimestamp": "2026-11-12T17:03:00.000Z",
+      "providerTimestampMs": 1794502980000,
+      "receiveTimestamp": "2026-11-12T17:03:14.678Z",
+      "receiveTimestampMs": 1794502994678,
+      "networkLatency": 14678,
+      "eventAge": 14678,
+      "elapsedSinceStart": 54851
+    },
+    {
+      "symbol": "EUR/USD",
+      "price": 1.10572,
+      "providerTimestamp": "2026-11-12T17:03:00.000Z",
+      "providerTimestampMs": 1794502980000,
+      "receiveTimestamp": "2026-11-12T17:03:15.715Z",
+      "receiveTimestampMs": 1794502995715,
+      "networkLatency": 15715,
+      "eventAge": 15715,
+      "elapsedSinceStart": 55888
+    },
+    {
+      "symbol": "EUR/USD",
+      "price": 1.10567,
+      "providerTimestamp": "2026-11-12T17:03:00.000Z",
+      "providerTimestampMs": 1794502980000,
+      "receiveTimestamp": "2026-11-12T17:03:18.619Z",
+      "receiveTimestampMs": 1794502998619,
+      "networkLatency": 18619,
+      "eventAge": 18619,
+      "elapsedSinceStart": 58792
+    }
+  ],
+  "serverEvents": [],
+  "frontendEvents": [],
+  "connectionEvents": [
+    {
+      "event": "PROVIDER_CONNECTED",
+      "timestamp": "2026-11-12T17:02:20.191Z"
+    },
+    {
+      "event": "PROVIDER_DISCONNECTED",
+      "timestamp": "2026-11-12T17:03:20.201Z",
+      "code": 1005,
+      "reason": ""
+    }
+  ],
+  "candleUpdates": [],
+  "latencyMeasurements": [
+    {
+      "type": "PROVIDER_TO_TEST_CLIENT",
+      "latencyMs": 21920,
+      "eventAgeMs": 21920,
+      "timestamp": "2026-11-12T17:02:21.920Z"
+    },
+    {
+      "type": "PROVIDER_TO_TEST_CLIENT",
+      "latencyMs": 24175,
+      "eventAgeMs": 24175,
+      "timestamp": "2026-11-12T17:02:24.175Z"
+    },
+    {
+      "type": "PROVIDER_TO_TEST_CLIENT",
+      "latencyMs": 25680,
+      "eventAgeMs": 25680,
+      "timestamp": "2026-11-12T17:02:25.680Z"
+    },
+    {
+      "type": "PROVIDER_TO_TEST_CLIENT",
+      "latencyMs": 27343,
+      "eventAgeMs": 27343,
+      "timestamp": "2026-11-12T17:02:27.343Z"
+    },
+    {
+      "type": "PROVIDER_TO_TEST_CLIENT",
+      "latencyMs": 28755,
+      "eventAgeMs": 28755,
+      "timestamp": "2026-11-12T17:02:28.755Z"
+    },
+    {
+      "type": "PROVIDER_TO_TEST_CLIENT",
+      "latencyMs": 29714,
+      "eventAgeMs": 29714,
+      "timestamp": "2026-11-12T17:02:29.714Z"
+    },
+    {
+      "type": "PROVIDER_TO_TEST_CLIENT",
+      "latencyMs": 32702,
+      "eventAgeMs": 32702,
+      "timestamp": "2026-11-12T17:02:32.702Z"
+    },
+    {
+      "type": "PROVIDER_TO_TEST_CLIENT",
+      "latencyMs": 34106,
+      "eventAgeMs": 34106,
+      "timestamp": "2026-11-12T17:02:34.106Z"
+    },
+    {
+      "type": "PROVIDER_TO_TEST_CLIENT",
+      "latencyMs": 35867,
+      "eventAgeMs": 35867,
+      "timestamp": "2026-11-12T17:02:35.867Z"
+    },
+    {
+      "type": "PROVIDER_TO_TEST_CLIENT",
+      "latencyMs": 37707,
+      "eventAgeMs": 37707,
+      "timestamp": "2026-11-12T17:02:37.707Z"
+    },
+    {
+      "type": "PROVIDER_TO_TEST_CLIENT",
+      "latencyMs": 39689,
+      "eventAgeMs": 39689,
+      "timestamp": "2026-11-12T17:02:39.689Z"
+    },
+    {
+      "type": "PROVIDER_TO_TEST_CLIENT",
+      "latencyMs": 40687,
+      "eventAgeMs": 40687,
+      "timestamp": "2026-11-12T17:02:40.687Z"
+    },
+    {
+      "type": "PROVIDER_TO_TEST_CLIENT",
+      "latencyMs": 44458,
+      "eventAgeMs": 44458,
+      "timestamp": "2026-11-12T17:02:44.458Z"
+    },
+    {
+      "type": "PROVIDER_TO_TEST_CLIENT",
+      "latencyMs": 45689,
+      "eventAgeMs": 45689,
+      "timestamp": "2026-11-12T17:02:45.689Z"
+    },
+    {
+      "type": "PROVIDER_TO_TEST_CLIENT",
+      "latencyMs": 46600,
+      "eventAgeMs": 46600,
+      "timestamp": "2026-11-12T17:02:46.600Z"
+    },
+    {
+      "type": "PROVIDER_TO_TEST_CLIENT",
+      "latencyMs": 48802,
+      "eventAgeMs": 48802,
+      "timestamp": "2026-11-12T17:02:48.802Z"
+    },
+    {
+      "type": "PROVIDER_TO_TEST_CLIENT",
+      "latencyMs": 50806,
+      "eventAgeMs": 50806,
+      "timestamp": "2026-11-12T17:02:50.806Z"
+    },
+    {
+      "type": "PROVIDER_TO_TEST_CLIENT",
+      "latencyMs": 52663,
+      "eventAgeMs": 52663,
+      "timestamp": "2026-11-12T17:02:52.663Z"
+    },
+    {
+      "type": "PROVIDER_TO_TEST_CLIENT",
+      "latencyMs": 55733,
+      "eventAgeMs": 55733,
+      "timestamp": "2026-11-12T17:02:55.733Z"
+    },
+    {
+      "type": "PROVIDER_TO_TEST_CLIENT",
+      "latencyMs": 58601,
+      "eventAgeMs": 58601,
+      "timestamp": "2026-11-12T17:02:58.601Z"
+    },
+    {
+      "type": "PROVIDER_TO_TEST_CLIENT",
+      "latencyMs": 3627,
+      "eventAgeMs": 3627,
+      "timestamp": "2026-11-12T17:03:03.627Z"
+    },
+    {
+      "type": "PROVIDER_TO_TEST_CLIENT",
+      "latencyMs": 6545,
+      "eventAgeMs": 6545,
+      "timestamp": "2026-11-12T17:03:06.545Z"
+    },
+    {
+      "type": "PROVIDER_TO_TEST_CLIENT",
+      "latencyMs": 7815,
+      "eventAgeMs": 7815,
+      "timestamp": "2026-11-12T17:03:07.815Z"
+    },
+    {
+      "type": "PROVIDER_TO_TEST_CLIENT",
+      "latencyMs": 10980,
+      "eventAgeMs": 10980,
+      "timestamp": "2026-11-12T17:03:10.980Z"
+    },
+    {
+      "type": "PROVIDER_TO_TEST_CLIENT",
+      "latencyMs": 12157,
+      "eventAgeMs": 12157,
+      "timestamp": "2026-11-12T17:03:12.157Z"
+    },
+    {
+      "type": "PROVIDER_TO_TEST_CLIENT",
+      "latencyMs": 12993,
+      "eventAgeMs": 12993,
+      "timestamp": "2026-11-12T17:03:12.993Z"
+    },
+    {
+      "type": "PROVIDER_TO_TEST_CLIENT",
+      "latencyMs": 14678,
+      "eventAgeMs": 14678,
+      "timestamp": "2026-11-12T17:03:14.678Z"
+    },
+    {
+      "type": "PROVIDER_TO_TEST_CLIENT",
+      "latencyMs": 15715,
+      "eventAgeMs": 15715,
+      "timestamp": "2026-11-12T17:03:15.715Z"
+    },
+    {
+      "type": "PROVIDER_TO_TEST_CLIENT",
+      "latencyMs": 18619,
+      "eventAgeMs": 18619,
+      "timestamp": "2026-11-12T17:03:18.619Z"
+    }
+  ],
+  "errors": [
+    {
+      "type": "BACKEND_CHECK_FAILED",
+      "message": "Request failed with status code 404",
+      "timestamp": "2026-11-12T17:03:20.248Z"
+    }
+  ]
+}

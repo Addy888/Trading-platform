@@ -1,0 +1,450 @@
+{
+  "auth": {
+    "status": "PASS",
+    "userId": "cb08c640-0460-4584-84b7-25c809db88b3",
+    "tokenLength": 255
+  },
+  "health": {
+    "status": "PASS",
+    "data": {
+      "status": "ok",
+      "service": "tradeing-api",
+      "database": "healthy",
+      "marketData": {
+        "primaryProvider": "TWELVE_DATA",
+        "configuration": {
+          "configured": true,
+          "missingVariables": [],
+          "apiBaseUrl": "https://api.twelvedata.com",
+          "streamingConfigured": true,
+          "streamingMode": "POLLING",
+          "pollingIntervalMs": 900000,
+          "staleThresholdMs": 1200000
+        },
+        "errorCategory": null,
+        "lastUpdateAt": "2026-11-12T17:41:27.095Z",
+        "candleLastSuccessAt": "2026-11-12T17:41:27.095Z",
+        "quoteLastSuccessAt": "2026-11-12T17:41:20.448Z",
+        "websocketConnectionState": "CONNECTED",
+        "websocketRestriction": null,
+        "websocketLastPriceAt": null,
+        "providers": {
+          "TWELVE_DATA": {
+            "status": "AVAILABLE",
+            "errorCategory": null,
+            "lastError": null,
+            "candleStatus": "AVAILABLE",
+            "candleErrorCategory": null,
+            "candleLastError": null,
+            "quoteStatus": "AVAILABLE",
+            "quoteErrorCategory": null,
+            "quoteLastError": null,
+            "retryAfter": null,
+            "lastUpdateAt": "2026-11-12T17:41:27.095Z",
+            "candleLastSuccessAt": "2026-11-12T17:41:27.095Z",
+            "quoteLastSuccessAt": "2026-11-12T17:41:20.448Z",
+            "directoryLastSuccessAt": null,
+            "directoryLastError": null,
+            "streamingMode": "WEBSOCKET",
+            "websocketConnectionState": "CONNECTED",
+            "websocketRestriction": null,
+            "websocketLastPriceAt": null
+          }
+        },
+        "quoteCacheSize": 0,
+        "candleCacheSize": 1
+      }
+    }
+  },
+  "marketStatus": {
+    "status": "PASS",
+    "configured": true,
+    "provider": "TWELVE_DATA"
+  },
+  "candleTests": {
+    "EURUSD_1min": {
+      "status": "PASS",
+      "candleCount": 100,
+      "responseTime": 292,
+      "validation": {
+        "duplicates": 0,
+        "ohlcViolations": 0,
+        "invalidTimestamps": 0,
+        "sorted": true,
+        "priceRange": {
+          "min": 1.10525,
+          "max": 1.10676
+        }
+      },
+      "dataStatus": "DELAYED",
+      "firstCandle": "2026-11-12T16:02:00.000Z",
+      "lastCandle": "2026-11-12T17:41:00.000Z"
+    },
+    "EURUSD_5min": {
+      "status": "PASS",
+      "candleCount": 100,
+      "responseTime": 7991,
+      "validation": {
+        "duplicates": 0,
+        "ohlcViolations": 0,
+        "invalidTimestamps": 0,
+        "sorted": true,
+        "priceRange": {
+          "min": 1.10525,
+          "max": 1.11032
+        }
+      },
+      "dataStatus": "LIVE",
+      "firstCandle": "2026-11-12T09:25:00.000Z",
+      "lastCandle": "2026-11-12T17:40:00.000Z"
+    },
+    "EURUSD_15min": {
+      "status": "PASS",
+      "candleCount": 100,
+      "responseTime": 8092,
+      "validation": {
+        "duplicates": 0,
+        "ohlcViolations": 0,
+        "invalidTimestamps": 0,
+        "sorted": true,
+        "priceRange": {
+          "min": 1.10525,
+          "max": 1.11032
+        }
+      },
+      "dataStatus": "LIVE",
+      "firstCandle": "2026-11-11T16:45:00.000Z",
+      "lastCandle": "2026-11-12T17:30:00.000Z"
+    },
+    "EURUSD_30min": {
+      "status": "PASS",
+      "candleCount": 100,
+      "responseTime": 7990,
+      "validation": {
+        "duplicates": 0,
+        "ohlcViolations": 0,
+        "invalidTimestamps": 0,
+        "sorted": true,
+        "priceRange": {
+          "min": 1.10525,
+          "max": 1.11703
+        }
+      },
+      "dataStatus": "LIVE",
+      "firstCandle": "2026-11-10T16:00:00.000Z",
+      "lastCandle": "2026-11-12T17:30:00.000Z"
+    },
+    "EURUSD_1h": {
+      "status": "PASS",
+      "candleCount": 100,
+      "responseTime": 8045,
+      "validation": {
+        "duplicates": 0,
+        "ohlcViolations": 0,
+        "invalidTimestamps": 0,
+        "sorted": true,
+        "priceRange": {
+          "min": 1.10525,
+          "max": 1.12513
+        }
+      },
+      "dataStatus": "LIVE",
+      "firstCandle": "2026-11-08T14:00:00.000Z",
+      "lastCandle": "2026-11-12T17:00:00.000Z"
+    },
+    "EURUSD_4h": {
+      "status": "PASS",
+      "candleCount": 100,
+      "responseTime": 7974,
+      "validation": {
+        "duplicates": 0,
+        "ohlcViolations": 0,
+        "invalidTimestamps": 0,
+        "sorted": true,
+        "priceRange": {
+          "min": 1.10525,
+          "max": 1.12734
+        }
+      },
+      "dataStatus": "LIVE",
+      "firstCandle": "2026-10-27T04:00:00.000Z",
+      "lastCandle": "2026-11-12T16:00:00.000Z"
+    },
+    "EURUSD_1day": {
+      "status": "PASS",
+      "candleCount": 100,
+      "responseTime": 7955,
+      "validation": {
+        "duplicates": 0,
+        "ohlcViolations": 0,
+        "invalidTimestamps": 0,
+        "sorted": true,
+        "priceRange": {
+          "min": 1.10525,
+          "max": 1.17109
+        }
+      },
+      "dataStatus": "LIVE",
+      "firstCandle": "2026-08-05T00:00:00.000Z",
+      "lastCandle": "2026-11-12T00:00:00.000Z"
+    },
+    "GBPUSD_1min": {
+      "status": "PASS",
+      "candleCount": 100,
+      "responseTime": 19,
+      "validation": {
+        "duplicates": 0,
+        "ohlcViolations": 0,
+        "invalidTimestamps": 0,
+        "sorted": true,
+        "priceRange": {
+          "min": 1.32298,
+          "max": 1.32433
+        }
+      },
+      "dataStatus": "DELAYED",
+      "firstCandle": "2026-11-12T16:00:00.000Z",
+      "lastCandle": "2026-11-12T17:39:00.000Z"
+    },
+    "GBPUSD_5min": {
+      "status": "PASS",
+      "candleCount": 100,
+      "responseTime": 8027,
+      "validation": {
+        "duplicates": 0,
+        "ohlcViolations": 0,
+        "invalidTimestamps": 0,
+        "sorted": true,
+        "priceRange": {
+          "min": 1.32224,
+          "max": 1.32797
+        }
+      },
+      "dataStatus": "LIVE",
+      "firstCandle": "2026-11-12T09:25:00.000Z",
+      "lastCandle": "2026-11-12T17:40:00.000Z"
+    },
+    "GBPUSD_15min": {
+      "status": "PASS",
+      "candleCount": 100,
+      "responseTime": 7942,
+      "validation": {
+        "duplicates": 0,
+        "ohlcViolations": 0,
+        "invalidTimestamps": 0,
+        "sorted": true,
+        "priceRange": {
+          "min": 1.32224,
+          "max": 1.32927
+        }
+      },
+      "dataStatus": "LIVE",
+      "firstCandle": "2026-11-11T16:45:00.000Z",
+      "lastCandle": "2026-11-12T17:30:00.000Z"
+    },
+    "GBPUSD_30min": {
+      "status": "PASS",
+      "candleCount": 100,
+      "responseTime": 8068,
+      "validation": {
+        "duplicates": 0,
+        "ohlcViolations": 0,
+        "invalidTimestamps": 0,
+        "sorted": true,
+        "priceRange": {
+          "min": 1.32224,
+          "max": 1.3395
+        }
+      },
+      "dataStatus": "LIVE",
+      "firstCandle": "2026-11-10T16:00:00.000Z",
+      "lastCandle": "2026-11-12T17:30:00.000Z"
+    },
+    "GBPUSD_1h": {
+      "status": "PASS",
+      "candleCount": 100,
+      "responseTime": 8048,
+      "validation": {
+        "duplicates": 0,
+        "ohlcViolations": 0,
+        "invalidTimestamps": 0,
+        "sorted": true,
+        "priceRange": {
+          "min": 1.32224,
+          "max": 1.34604
+        }
+      },
+      "dataStatus": "LIVE",
+      "firstCandle": "2026-11-08T14:00:00.000Z",
+      "lastCandle": "2026-11-12T17:00:00.000Z"
+    },
+    "GBPUSD_4h": {
+      "status": "PASS",
+      "candleCount": 100,
+      "responseTime": 7921,
+      "validation": {
+        "duplicates": 0,
+        "ohlcViolations": 0,
+        "invalidTimestamps": 0,
+        "sorted": true,
+        "priceRange": {
+          "min": 1.32224,
+          "max": 1.35023
+        }
+      },
+      "dataStatus": "LIVE",
+      "firstCandle": "2026-10-27T04:00:00.000Z",
+      "lastCandle": "2026-11-12T16:00:00.000Z"
+    },
+    "GBPUSD_1day": {
+      "status": "PASS",
+      "candleCount": 100,
+      "responseTime": 8072,
+      "validation": {
+        "duplicates": 0,
+        "ohlcViolations": 0,
+        "invalidTimestamps": 0,
+        "sorted": true,
+        "priceRange": {
+          "min": 1.31382,
+          "max": 1.36752
+        }
+      },
+      "dataStatus": "LIVE",
+      "firstCandle": "2026-08-05T00:00:00.000Z",
+      "lastCandle": "2026-11-12T00:00:00.000Z"
+    },
+    "USDJPY_1min": {
+      "status": "PASS",
+      "candleCount": 100,
+      "responseTime": 8328,
+      "validation": {
+        "duplicates": 0,
+        "ohlcViolations": 0,
+        "invalidTimestamps": 0,
+        "sorted": true,
+        "priceRange": {
+          "min": 159.51418,
+          "max": 160.1141
+        }
+      },
+      "dataStatus": "LIVE",
+      "firstCandle": "2026-11-12T16:04:00.000Z",
+      "lastCandle": "2026-11-12T17:43:00.000Z"
+    },
+    "USDJPY_5min": {
+      "status": "PASS",
+      "candleCount": 100,
+      "responseTime": 7704,
+      "validation": {
+        "duplicates": 0,
+        "ohlcViolations": 0,
+        "invalidTimestamps": 0,
+        "sorted": true,
+        "priceRange": {
+          "min": 159.51418,
+          "max": 160.1141
+        }
+      },
+      "dataStatus": "LIVE",
+      "firstCandle": "2026-11-12T09:25:00.000Z",
+      "lastCandle": "2026-11-12T17:40:00.000Z"
+    },
+    "USDJPY_15min": {
+      "status": "PASS",
+      "candleCount": 100,
+      "responseTime": 8027,
+      "validation": {
+        "duplicates": 0,
+        "ohlcViolations": 0,
+        "invalidTimestamps": 0,
+        "sorted": true,
+        "priceRange": {
+          "min": 159.48412,
+          "max": 160.1141
+        }
+      },
+      "dataStatus": "LIVE",
+      "firstCandle": "2026-11-11T16:45:00.000Z",
+      "lastCandle": "2026-11-12T17:30:00.000Z"
+    },
+    "USDJPY_30min": {
+      "status": "PASS",
+      "candleCount": 100,
+      "responseTime": 7933,
+      "validation": {
+        "duplicates": 0,
+        "ohlcViolations": 0,
+        "invalidTimestamps": 0,
+        "sorted": true,
+        "priceRange": {
+          "min": 158.66176,
+          "max": 160.1141
+        }
+      },
+      "dataStatus": "LIVE",
+      "firstCandle": "2026-11-10T16:00:00.000Z",
+      "lastCandle": "2026-11-12T17:30:00.000Z"
+    },
+    "USDJPY_1h": {
+      "status": "PASS",
+      "candleCount": 100,
+      "responseTime": 8021,
+      "validation": {
+        "duplicates": 0,
+        "ohlcViolations": 0,
+        "invalidTimestamps": 0,
+        "sorted": true,
+        "priceRange": {
+          "min": 157.67158,
+          "max": 160.1141
+        }
+      },
+      "dataStatus": "LIVE",
+      "firstCandle": "2026-11-08T14:00:00.000Z",
+      "lastCandle": "2026-11-12T17:00:00.000Z"
+    },
+    "USDJPY_4h": {
+      "status": "PASS",
+      "candleCount": 100,
+      "responseTime": 8127,
+      "validation": {
+        "duplicates": 0,
+        "ohlcViolations": 0,
+        "invalidTimestamps": 0,
+        "sorted": true,
+        "priceRange": {
+          "min": 156.9716,
+          "max": 160.1141
+        }
+      },
+      "dataStatus": "LIVE",
+      "firstCandle": "2026-10-27T04:00:00.000Z",
+      "lastCandle": "2026-11-12T16:00:00.000Z"
+    },
+    "USDJPY_1day": {
+      "status": "PASS",
+      "candleCount": 100,
+      "responseTime": 8038,
+      "validation": {
+        "duplicates": 0,
+        "ohlcViolations": 0,
+        "invalidTimestamps": 0,
+        "sorted": true,
+        "priceRange": {
+          "min": 152.37945,
+          "max": 160.40466
+        }
+      },
+      "dataStatus": "LIVE",
+      "firstCandle": "2026-08-05T00:00:00.000Z",
+      "lastCandle": "2026-11-12T00:00:00.000Z"
+    }
+  },
+  "summary": {
+    "timestamp": "2026-11-12T17:45:14.696Z",
+    "allPassed": true,
+    "totalTests": 24,
+    "passedTests": 24
+  }
+}

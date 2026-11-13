@@ -11,12 +11,13 @@ interface MarketPriceUpdate {
 }
 
 interface MarketConnectionUpdate {
-  status: 'CONNECTED' | 'DISCONNECTED';
+  status: 'CONNECTED' | 'DISCONNECTED' | 'HISTORICAL_ONLY';
   provider: string;
   connectedAt?: string;
   disconnectedAt?: string;
   code?: number;
   reason?: string;
+  restriction?: string;
 }
 
 interface CandleUpdate {
@@ -25,6 +26,19 @@ interface CandleUpdate {
   high: number;
   low: number;
   close: number;
+}
+
+// Backend aggregated candle update from CandleAggregatorService
+interface ForexCandleUpdate {
+  symbol: string;
+  timeframe: string;
+  time: number; // Unix seconds
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  providerTimestamp: string;
+  serverReceivedTimestamp: string;
 }
 
 interface MarketWebSocketStatus {
@@ -40,12 +54,13 @@ interface MarketWebSocketStatus {
 /**
  * Hook to manage market data WebSocket subscriptions
  * 
- * Subscribes to real-time price updates from the Twelve Data WebSocket
- * and aggregates ticks into candlestick updates based on timeframe.
+ * Subscribes to real-time aggregated candle updates from the backend.
+ * The backend CandleAggregatorService converts Twelve Data ticks into OHLC candles.
  * 
  * @param socket Socket.IO connection (from useSocket hook)
  * @param symbols Array of symbols to subscribe to (e.g., ['EURUSD'])
  * @param enabled Whether to enable WebSocket subscriptions
+ * @param timeframe Timeframe for candles (e.g., '1m', '5m', '1H')
  * @returns Status and candle update callback
  */
 export function useMarketWebSocket(
@@ -70,67 +85,8 @@ export function useMarketWebSocket(
 
   const [latestCandle, setLatestCandle] = useState<CandleUpdate | null>(null);
   
-  // Track current candle aggregation
+  // Track current candle 
   const currentCandleRef = useRef<CandleUpdate | null>(null);
-  const timeframeMillisRef = useRef<number>(3600000); // Default 1H = 3600000ms
-
-  // Parse timeframe to milliseconds
-  useEffect(() => {
-    const timeframeMap: Record<string, number> = {
-      '1m': 60000,
-      '5m': 300000,
-      '15m': 900000,
-      '30m': 1800000,
-      '1H': 3600000,
-      '4H': 14400000,
-      '1D': 86400000,
-    };
-    timeframeMillisRef.current = timeframeMap[timeframe] || 3600000;
-  }, [timeframe]);
-
-  /**
-   * Get the candle time bucket for a given timestamp
-   */
-  const getCandleTime = useCallback((timestamp: number): number => {
-    const timeframeMs = timeframeMillisRef.current;
-    return Math.floor(timestamp / timeframeMs) * timeframeMs;
-  }, []); // Empty deps - uses ref which doesn't change
-
-  /**
-   * Aggregate a price tick into the current candle
-   */
-  const aggregateTick = useCallback((price: number, timestamp: number) => {
-    const candleTime = getCandleTime(timestamp);
-    const candleTimeSeconds = Math.floor(candleTime / 1000);
-
-    if (!currentCandleRef.current || currentCandleRef.current.time !== candleTimeSeconds) {
-      // Start a new candle
-      currentCandleRef.current = {
-        time: candleTimeSeconds,
-        open: price,
-        high: price,
-        low: price,
-        close: price,
-      };
-      console.log('[useMarketWebSocket] New candle started:', {
-        time: new Date(candleTime).toISOString(),
-        price,
-      });
-    } else {
-      // Update existing candle
-      currentCandleRef.current.high = Math.max(currentCandleRef.current.high, price);
-      currentCandleRef.current.low = Math.min(currentCandleRef.current.low, price);
-      currentCandleRef.current.close = price;
-      console.log('[useMarketWebSocket] Candle updated:', {
-        time: new Date(candleTime).toISOString(),
-        price,
-        candle: currentCandleRef.current,
-      });
-    }
-
-    // Update the latest candle state
-    setLatestCandle({ ...currentCandleRef.current });
-  }, [getCandleTime]); // Now getCandleTime is stable
 
   /**
    * Clear the latest candle (e.g., when switching symbols)
@@ -149,19 +105,23 @@ export function useMarketWebSocket(
       return;
     }
 
-    console.log('[useMarketWebSocket] Subscribing to:', symbols);
+    console.log('[useMarketWebSocket] Subscribing to:', symbols, 'for timeframe:', timeframe);
 
     // Subscribe to symbols
     socket.emit('market:subscribe', { symbols }, (response: any) => {
       if (response?.success) {
-        console.log('[useMarketWebSocket] Subscription successful:', response.subscribed);
+        console.log('[useMarketWebSocket] ✅ Subscription successful:', {
+          subscribed: response.subscribed,
+          connectionState: response.connectionState,
+          restriction: response.restriction,
+        });
         setStatus(prev => ({
           ...prev,
           subscribed: response.subscribed || [],
           error: response.errors?.length ? response.errors.join(', ') : null,
         }));
       } else {
-        console.error('[useMarketWebSocket] Subscription failed:', response);
+        console.error('[useMarketWebSocket] ❌ Subscription failed:', response);
         setStatus(prev => ({
           ...prev,
           error: response?.errors?.join(', ') || 'Subscription failed',
@@ -169,9 +129,21 @@ export function useMarketWebSocket(
       }
     });
 
-    // Listen for price updates
-    const handlePriceUpdate = (update: MarketPriceUpdate) => {
-      console.log('[useMarketWebSocket] Price update received:', update);
+    // ✅ CRITICAL FIX: Listen for aggregated candle updates from backend
+    // Backend CandleAggregatorService already converts ticks → candles
+    const handleCandleUpdate = (update: ForexCandleUpdate) => {
+      // Only process candles for our requested timeframe
+      if (update.timeframe !== timeframe) {
+        return;
+      }
+
+      console.log('[useMarketWebSocket] 📊 Candle update received:', {
+        symbol: update.symbol,
+        timeframe: update.timeframe,
+        time: new Date(update.time * 1000).toISOString(),
+        close: update.close,
+        providerTimestamp: update.providerTimestamp,
+      });
 
       const providerTimestamp = new Date(update.providerTimestamp);
       const frontendReceiveTime = new Date();
@@ -180,39 +152,53 @@ export function useMarketWebSocket(
         ...prev,
         lastProviderUpdate: providerTimestamp,
         lastFrontendReceive: frontendReceiveTime,
-        feedMode: update.feedMode,
-        provider: update.provider,
+        feedMode: 'WEBSOCKET',
+        provider: 'TWELVE_DATA',
+        providerConnected: true,
       }));
 
-      // Aggregate the price into a candle
-      aggregateTick(update.price, providerTimestamp.getTime());
+      // Use the backend-aggregated candle directly
+      const candle: CandleUpdate = {
+        time: update.time, // Already in Unix seconds
+        open: update.open,
+        high: update.high,
+        low: update.low,
+        close: update.close,
+      };
+
+      currentCandleRef.current = candle;
+      setLatestCandle({ ...candle });
+
+      console.log('[useMarketWebSocket] ✅ Candle state updated:', candle);
     };
 
     // Listen for connection status changes
     const handleConnectionUpdate = (update: MarketConnectionUpdate) => {
-      console.log('[useMarketWebSocket] Connection update:', update);
+      console.log('[useMarketWebSocket] 🔌 Connection update:', update);
 
       setStatus(prev => ({
         ...prev,
         providerConnected: update.status === 'CONNECTED',
         provider: update.provider,
-        error: update.status === 'DISCONNECTED' ? update.reason || 'Disconnected' : null,
+        error: update.status === 'DISCONNECTED' ? update.reason || 'Disconnected' : 
+               update.status === 'HISTORICAL_ONLY' ? `WebSocket restricted: ${update.restriction}` : null,
       }));
     };
 
-    socket.on('market:price', handlePriceUpdate);
+    // ✅ Listen for aggregated candles (not raw price ticks)
+    socket.on('market:candle', handleCandleUpdate);
     socket.on('market:connection', handleConnectionUpdate);
 
     // Cleanup on unmount or when symbols change
     return () => {
       console.log('[useMarketWebSocket] Unsubscribing from:', symbols);
       socket.emit('market:unsubscribe', { symbols });
-      socket.off('market:price', handlePriceUpdate);
+      socket.off('market:candle', handleCandleUpdate);
       socket.off('market:connection', handleConnectionUpdate);
     };
     // ✅ FIXED: Use symbolsKey instead of symbols array to prevent infinite loop
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [socket, symbolsKey, enabled, aggregateTick]);
+  }, [socket, symbolsKey, enabled, timeframe]);
 
   // Reset candle aggregation when timeframe or symbols change
   useEffect(() => {

@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebSocket Live Test - EUR/USD</title>
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <style>
+        body {
+            font-family: 'Courier New', monospace;
+            background: #1a1a1a;
+            color: #0f0;
+            padding: 20px;
+            margin: 0;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        h1 {
+            color: #0f0;
+            border-bottom: 2px solid #0f0;
+            padding-bottom: 10px;
+        }
+        .status {
+            padding: 15px;
+            margin: 15px 0;
+            border: 2px solid #333;
+            border-radius: 5px;
+            background: #000;
+        }
+        .status.connected {
+            border-color: #0f0;
+        }
+        .status.disconnected {
+            border-color: #f00;
+            color: #f00;
+        }
+        .log {
+            background: #000;
+            border: 1px solid #333;
+            padding: 15px;
+            height: 400px;
+            overflow-y: auto;
+            margin: 15px 0;
+            font-size: 12px;
+            line-height: 1.6;
+        }
+        .log-entry {
+            margin: 5px 0;
+        }
+        .log-entry.success {
+            color: #0f0;
+        }
+        .log-entry.error {
+            color: #f00;
+        }
+        .log-entry.info {
+            color: #0af;
+        }
+        .log-entry.candle {
+            color: #ff0;
+            font-weight: bold;
+        }
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 15px;
+            margin: 15px 0;
+        }
+        .stat-box {
+            background: #000;
+            border: 2px solid #333;
+            padding: 15px;
+            border-radius: 5px;
+            text-align: center;
+        }
+        .stat-value {
+            font-size: 24px;
+            font-weight: bold;
+            color: #0f0;
+            margin: 10px 0;
+        }
+        .stat-label {
+            color: #888;
+            font-size: 12px;
+        }
+        button {
+            background: #0f0;
+            color: #000;
+            border: none;
+            padding: 12px 24px;
+            font-size: 14px;
+            font-family: 'Courier New', monospace;
+            cursor: pointer;
+            margin: 5px;
+            border-radius: 3px;
+            font-weight: bold;
+        }
+        button:hover {
+            background: #0c0;
+        }
+        button.danger {
+            background: #f00;
+            color: #fff;
+        }
+        button.danger:hover {
+            background: #c00;
+        }
+        .current-candle {
+            background: #000;
+            border: 2px solid #0f0;
+            padding: 20px;
+            margin: 15px 0;
+            border-radius: 5px;
+        }
+        .candle-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 10px;
+            margin-top: 15px;
+        }
+        .candle-value {
+            text-align: center;
+        }
+        .candle-value-label {
+            color: #888;
+            font-size: 11px;
+        }
+        .candle-value-number {
+            font-size: 20px;
+            color: #0f0;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔴 LIVE WebSocket Test - EUR/USD Real-Time Data</h1>
+        
+        <div class="status" id="status">
+            <strong>Status:</strong> <span id="statusText">Initializing...</span><br>
+            <strong>Backend:</strong> http://localhost:3001/trading<br>
+            <strong>Symbol:</strong> EURUSD<br>
+            <strong>Timeframe:</strong> 1 minute
+        </div>
+
+        <div class="stats">
+            <div class="stat-box">
+                <div class="stat-label">MESSAGES RECEIVED</div>
+                <div class="stat-value" id="messageCount">0</div>
+            </div>
+            <div class="stat-box">
+                <div class="stat-label">CANDLE UPDATES</div>
+                <div class="stat-value" id="candleCount">0</div>
+            </div>
+            <div class="stat-box">
+                <div class="stat-label">LATEST PRICE</div>
+                <div class="stat-value" id="latestPrice">--</div>
+            </div>
+        </div>
+
+        <div class="current-candle">
+            <h3 style="margin-top: 0; color: #0f0;">📊 Current 1-Minute Candle</h3>
+            <div class="candle-grid">
+                <div class="candle-value">
+                    <div class="candle-value-label">OPEN</div>
+                    <div class="candle-value-number" id="candleOpen">--</div>
+                </div>
+                <div class="candle-value">
+                    <div class="candle-value-label">HIGH</div>
+                    <div class="candle-value-number" id="candleHigh">--</div>
+                </div>
+                <div class="candle-value">
+                    <div class="candle-value-label">LOW</div>
+                    <div class="candle-value-number" id="candleLow">--</div>
+                </div>
+                <div class="candle-value">
+                    <div class="candle-value-label">CLOSE</div>
+                    <div class="candle-value-number" id="candleClose">--</div>
+                </div>
+            </div>
+            <div style="margin-top: 15px; color: #888; font-size: 12px;">
+                <strong>Time:</strong> <span id="candleTime">--</span><br>
+                <strong>Provider:</strong> <span id="candleProvider">--</span><br>
+                <strong>Last Update:</strong> <span id="candleLastUpdate">--</span>
+            </div>
+        </div>
+
+        <div>
+            <button onclick="connect()">🔌 Connect</button>
+            <button onclick="subscribe()">📡 Subscribe EUR/USD</button>
+            <button onclick="unsubscribe()">❌ Unsubscribe</button>
+            <button onclick="disconnect()" class="danger">🔌 Disconnect</button>
+            <button onclick="clearLog()">🗑️ Clear Log</button>
+        </div>
+
+        <div class="log" id="log"></div>
+
+        <div style="margin-top: 20px; padding: 15px; background: #000; border: 1px solid #333; border-radius: 5px;">
+            <h3 style="color: #0af; margin-top: 0;">📋 Instructions</h3>
+            <ol style="color: #888; line-height: 2;">
+                <li>Click <strong style="color: #0f0;">"Connect"</strong> to establish WebSocket connection</li>
+                <li>Click <strong style="color: #0f0;">"Subscribe EUR/USD"</strong> to start receiving live data</li>
+                <li>Watch the candle values update in real-time (every 3-10 seconds)</li>
+                <li>Compare prices with backend logs: <code style="color: #ff0;">C=1.10XXX</code></li>
+                <li>Watch for new candle when minute changes</li>
+            </ol>
+            <p style="color: #f00; margin: 0;"><strong>⚠️ IMPORTANT:</strong> This test does NOT require authentication - it connects directly to test the WebSocket infrastructure.</p>
+        </div>
+    </div>
+
+    <script>
+        let socket = null;
+        let messageCount = 0;
+        let candleCount = 0;
+        let latestCandle = null;
+
+        function log(message, type = 'info') {
+            const logDiv = document.getElementById('log');
+            const entry = document.createElement('div');
+            entry.className = `log-entry ${type}`;
+            const timestamp = new Date().toLocaleTimeString();
+            entry.textContent = `[${timestamp}] ${message}`;
+            logDiv.appendChild(entry);
+            logDiv.scrollTop = logDiv.scrollHeight;
+        }
+
+        function updateStatus(text, connected = false) {
+            const statusDiv = document.getElementById('status');
+            const statusText = document.getElementById('statusText');
+            statusText.textContent = text;
+            statusDiv.className = connected ? 'status connected' : 'status disconnected';
+        }
+
+        function updateStats() {
+            document.getElementById('messageCount').textContent = messageCount;
+            document.getElementById('candleCount').textContent = candleCount;
+            if (latestCandle) {
+                document.getElementById('latestPrice').textContent = latestCandle.close.toFixed(5);
+            }
+        }
+
+        function updateCandleDisplay(candle) {
+            document.getElementById('candleOpen').textContent = candle.open.toFixed(5);
+            document.getElementById('candleHigh').textContent = candle.high.toFixed(5);
+            document.getElementById('candleLow').textContent = candle.low.toFixed(5);
+            document.getElementById('candleClose').textContent = candle.close.toFixed(5);
+            document.getElementById('candleTime').textContent = new Date(candle.time * 1000).toLocaleString();
+            document.getElementById('candleProvider').textContent = 'Twelve Data WebSocket';
+            document.getElementById('candleLastUpdate').textContent = new Date().toLocaleTimeString();
+        }
+
+        function connect() {
+            if (socket && socket.connected) {
+                log('Already connected!', 'info');
+                return;
+            }
+
+            log('Connecting to http://localhost:3001/trading...', 'info');
+            updateStatus('Connecting...', false);
+
+            socket = io('http://localhost:3001/trading', {
+                reconnection: true,
+                reconnectionDelay: 1000,
+                transports: ['polling', 'websocket'],
+            });
+
+            socket.on('connect', () => {
+                log('✅ WebSocket CONNECTED!', 'success');
+                updateStatus('Connected to backend', true);
+            });
+
+            socket.on('disconnect', (reason) => {
+                log(`❌ Disconnected: ${reason}`, 'error');
+                updateStatus(`Disconnected: ${reason}`, false);
+            });
+
+            socket.on('connect_error', (error) => {
+                log(`❌ Connection error: ${error.message}`, 'error');
+                updateStatus(`Connection error: ${error.message}`, false);
+            });
+
+            socket.on('market:candle', (data) => {
+                messageCount++;
+                candleCount++;
+                
+                log(`📊 CANDLE UPDATE: ${data.symbol} @ ${data.timeframe} - Close: ${data.close}`, 'candle');
+                log(`   Time: ${new Date(data.time * 1000).toISOString()}`, 'info');
+                log(`   OHLC: O=${data.open} H=${data.high} L=${data.low} C=${data.close}`, 'info');
+                
+                latestCandle = data;
+                updateStats();
+                updateCandleDisplay(data);
+            });
+
+            socket.on('market:price', (data) => {
+                messageCount++;
+                log(`💰 PRICE UPDATE: ${data.symbol} - $${data.price}`, 'info');
+                updateStats();
+            });
+
+            socket.on('market:connection', (data) => {
+                messageCount++;
+                log(`🔌 CONNECTION UPDATE: ${data.status} - ${data.provider}`, 'info');
+                updateStats();
+            });
+        }
+
+        function subscribe() {
+            if (!socket || !socket.connected) {
+                log('❌ Not connected! Click "Connect" first.', 'error');
+                return;
+            }
+
+            log('📡 Subscribing to EURUSD...', 'info');
+
+            socket.emit('market:subscribe', { symbols: ['EURUSD'] }, (response) => {
+                if (response.success) {
+                    log(`✅ SUBSCRIPTION SUCCESSFUL!`, 'success');
+                    log(`   Subscribed to: ${response.subscribed.join(', ')}`, 'success');
+                    log(`   Connection State: ${response.connectionState}`, 'info');
+                    if (response.restriction) {
+                        log(`   ⚠️ Restriction: ${response.restriction}`, 'error');
+                    }
+                } else {
+                    log(`❌ Subscription failed: ${response.errors?.join(', ') || 'Unknown error'}`, 'error');
+                }
+            });
+        }
+
+        function unsubscribe() {
+            if (!socket || !socket.connected) {
+                log('❌ Not connected!', 'error');
+                return;
+            }
+
+            log('Unsubscribing from EURUSD...', 'info');
+
+            socket.emit('market:unsubscribe', { symbols: ['EURUSD'] }, (response) => {
+                if (response.success) {
+                    log(`✅ Unsubscribed from: ${response.unsubscribed.join(', ')}`, 'success');
+                } else {
+                    log('❌ Unsubscribe failed', 'error');
+                }
+            });
+        }
+
+        function disconnect() {
+            if (!socket) {
+                log('❌ Not connected!', 'error');
+                return;
+            }
+
+            log('Disconnecting...', 'info');
+            socket.disconnect();
+            socket = null;
+            updateStatus('Disconnected', false);
+        }
+
+        function clearLog() {
+            document.getElementById('log').innerHTML = '';
+            log('Log cleared', 'info');
+        }
+
+        // Auto-connect on page load
+        window.addEventListener('load', () => {
+            log('🚀 WebSocket Test Page Loaded', 'success');
+            log('Click "Connect" and then "Subscribe EUR/USD" to start', 'info');
+        });
+    </script>
+</body>
+</html>

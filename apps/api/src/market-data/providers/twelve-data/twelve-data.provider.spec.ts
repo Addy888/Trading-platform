@@ -165,16 +165,24 @@ describe('TwelveDataProvider', () => {
     });
   });
 
-  it('rejects duplicate timestamps and invalid OHLC values', async () => {
+  it('deduplicates duplicate timestamps instead of rejecting the series', async () => {
     const provider = new TwelveDataProvider();
     fetchMock.mockResolvedValue(providerResponse({
       values: [
         { datetime: '2026-10-29 10:00:00', open: '1.0', high: '1.2', low: '0.9', close: '1.1' },
-        { datetime: '2026-10-29T10:00:00Z', open: '1.0', high: '1.2', low: '0.9', close: '1.1' },
+        { datetime: '2026-10-29T10:00:00Z', open: '1.0', high: '1.25', low: '0.88', close: '1.12' },
       ],
     }));
-    await expect(provider.getTimeSeries('EURUSD', '1h', 2))
-      .rejects.toMatchObject({ category: 'PROVIDER', message: expect.stringContaining('duplicate or out-of-order') });
+    const candles = await provider.getTimeSeries('EURUSD', '1h', 2);
+    expect(candles).toHaveLength(1);
+    expect(candles[0].open.toNumber()).toBe(1);
+    expect(candles[0].close.toNumber()).toBe(1.12);
+    expect(candles[0].high.toNumber()).toBe(1.25);
+    expect(candles[0].low.toNumber()).toBe(0.88);
+  });
+
+  it('rejects invalid OHLC values', async () => {
+    const provider = new TwelveDataProvider();
 
     fetchMock.mockResolvedValue(providerResponse({
       values: [{ datetime: '2026-10-29 10:00:00', open: '1.0', high: '0.8', low: '0.9', close: '1.1' }],
