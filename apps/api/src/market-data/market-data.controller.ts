@@ -118,7 +118,17 @@ export class MarketDataController {
   }
 
   @Get('quote/:symbol')
-  async getQuote(@Param('symbol') symbol: string, @Query('exchange') exchange?: string) {
+  async getQuoteByPath(@Param('symbol') symbol: string, @Query('exchange') exchange?: string) {
+    const quote = await this.marketData.getQuote(symbol, exchange);
+    const servedAt = new Date().toISOString();
+    return { success: true, provider: 'TWELVE_DATA', symbol, quote, servedAt, timestamp: servedAt };
+  }
+
+  @Get('quote')
+  async getQuote(@Query('symbol') symbol: string, @Query('exchange') exchange?: string) {
+    if (!symbol?.trim() || symbol.trim().length > 80) {
+      throw new BadRequestException('A symbol between 1 and 80 characters is required.');
+    }
     const quote = await this.marketData.getQuote(symbol, exchange);
     const servedAt = new Date().toISOString();
     return { success: true, provider: 'TWELVE_DATA', symbol, quote, servedAt, timestamp: servedAt };

@@ -50,12 +50,14 @@ export class MarketDataManagerService implements OnModuleInit {
   private readonly pollingIntervalMs = Math.max(900_000, readPositiveSetting('MARKET_DATA_POLLING_INTERVAL', 900_000));
   private readonly staleThresholdMs = Math.max(this.pollingIntervalMs, readPositiveSetting('MARKET_DATA_STALE_THRESHOLD_MS', 1_200_000));
   private readonly quoteTtl = Math.max(this.pollingIntervalMs, readPositiveSetting('MARKET_DATA_QUOTE_CACHE_TTL', 900_000));
-  // ✅ FIX RATE LIMITS: Longer cache for historical candles (5 minutes default)
+  // ✅ FIX RATE LIMITS: Longer cache for historical candles (30 minutes default)
   // Historical data doesn't change often, safe to cache longer
-  private readonly candleTtl = Math.max(10_000, readPositiveSetting('MARKET_DATA_CANDLE_CACHE_TTL', 300_000));
-  // ✅ FIX RATE LIMITS: Add request throttling
+  // This significantly reduces Twelve Data API calls for the same symbol/interval
+  private readonly candleTtl = Math.max(10_000, readPositiveSetting('MARKET_DATA_CANDLE_CACHE_TTL', 1_800_000));
+  // ✅ FIX RATE LIMITS: Add request throttling to prevent burst requests
   private lastRequestTime = 0;
-  private readonly minRequestIntervalMs = readPositiveSetting('TWELVE_DATA_MIN_REQUEST_INTERVAL_MS', 8_000); // 8s = ~7.5 req/min (safe for free tier 8 req/min)
+  // Minimum interval between ANY requests to Twelve Data (8s = ~7.5 req/min, safe for free tier 8 req/min)
+  private readonly minRequestIntervalMs = readPositiveSetting('TWELVE_DATA_MIN_REQUEST_INTERVAL_MS', 8_000);
 
   private status: ProviderStatus;
   private quoteStatus: ProviderStatus;
@@ -181,7 +183,7 @@ export class MarketDataManagerService implements OnModuleInit {
 
   async getCandles(symbol: string, interval: string, count: number, exchange?: string) {
     return this.cached(
-      `candle:${symbol.toUpperCase()}:${exchange?.toUpperCase() || ''}:${interval}:${count}`,
+      `candle:${symbol.toUpperCase()}:${exchange?.toUpperCase() || 'NONE'}:${interval}:${count}`,
       this.candles,
       this.candleTtl,
       () => this.provider.getTimeSeries(symbol, interval, count, exchange),
@@ -282,8 +284,10 @@ export class MarketDataManagerService implements OnModuleInit {
         cache.set(key, { data, timestamp: Date.now() });
         
         // ✅ FIX RATE LIMITS: Limit cache size to prevent memory issues
+        // Keep cache reasonable (1000 entries = ~50MB for candles, manageable)
         if (cache.size > 1000) {
-          const oldestKey = cache.keys().next().value;
+          const oldestKey = Array.from(cache.entries())
+            .sort((a, b) => a[1].timestamp - b[1].timestamp)[0]?.[0];
           if (oldestKey) {
             cache.delete(oldestKey);
             this.logger.debug(`[Cache] Evicted oldest entry: ${oldestKey}`);

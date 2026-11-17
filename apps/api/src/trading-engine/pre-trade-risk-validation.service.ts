@@ -76,6 +76,7 @@ export interface OrderRequest {
   stopLoss?: Decimal;
   takeProfit?: Decimal;
   orderType?: string;
+  executionMode?: string; // SIMULATED or LIVE
 }
 
 /**
@@ -239,7 +240,7 @@ export class PreTradeRiskValidationService {
       }
 
       // Step 3: Validate symbol and market
-      const symbolCheck = await this.validateSymbolAndMarket(orderRequest.symbol);
+      const symbolCheck = await this.validateSymbolAndMarket(orderRequest.symbol, account.executionMode);
       validationSteps.push({
         step: 'Symbol & Market',
         passed: symbolCheck.passed,
@@ -570,7 +571,7 @@ export class PreTradeRiskValidationService {
   /**
    * Validate symbol and market availability
    */
-  private async validateSymbolAndMarket(symbol: string): Promise<{
+  private async validateSymbolAndMarket(symbol: string, executionMode?: string): Promise<{
     passed: boolean;
     code: PreTradeValidationCode;
     message: string;
@@ -597,7 +598,18 @@ export class PreTradeRiskValidationService {
       };
     }
 
-    // Check market status
+    // For SIMULATED mode, allow trading 24/7 - skip market hours check
+    if (executionMode === 'SIMULATED') {
+      return {
+        passed: true,
+        code: PreTradeValidationCode.APPROVED,
+        message: 'Symbol validated (SIMULATED mode)',
+        instrument,
+        details: { symbol, enabled: true, executionMode, marketHoursSkipped: true },
+      };
+    }
+
+    // Check market status for LIVE mode
     const marketStatus = this.marketData.getMarketStatus();
     if (marketStatus === MarketStatus.DISCONNECTED) {
       return {
@@ -623,7 +635,7 @@ export class PreTradeRiskValidationService {
       code: PreTradeValidationCode.APPROVED,
       message: 'Symbol and market validated',
       instrument,
-      details: { symbol, enabled: true, marketStatus },
+      details: { symbol, enabled: true, marketStatus, executionMode },
     };
   }
 

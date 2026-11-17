@@ -275,10 +275,12 @@ export function CandlestickChart({
       }
     };
     
-    const unsubscribe = timeScale.subscribeVisibleLogicalRangeChange(handleVisibleRangeChange);
+    const unsubscribe = timeScale.subscribeVisibleLogicalRangeChange(handleVisibleRangeChange) as (() => void) | undefined;
     
     return () => {
-      if (unsubscribe) unsubscribe();
+      if (unsubscribe) {
+        unsubscribe();
+      }
     };
   }, [data, onLoadOlderCandles, isLoadingHistory, hasMoreHistory]);
 

@@ -221,39 +221,48 @@ export class MarginService {
     let unrealizedPnl = new Decimal(0);
     let totalExposure = new Decimal(0);
 
-    for (const trade of account.trades) {
-      const instrument = this.instrumentConfig.getInstrument(trade.symbol);
-      if (!instrument) {
-        this.logger.warn(`Unknown instrument: ${trade.symbol}, skipping in margin calculation`);
-        continue;
+    // ✅ FIX: If there are no open positions, return zero margin immediately
+    // Do not require market data to be available
+    if (account.trades.length === 0) {
+      usedMargin = new Decimal(0);
+      unrealizedPnl = new Decimal(0);
+      totalExposure = new Decimal(0);
+    } else {
+      // Only validate market data if there are open positions to calculate
+      for (const trade of account.trades) {
+        const instrument = this.instrumentConfig.getInstrument(trade.symbol);
+        if (!instrument) {
+          this.logger.warn(`Unknown instrument: ${trade.symbol}, skipping in margin calculation`);
+          continue;
+        }
+
+        if (!this.marketData.isMarketAvailable(trade.symbol)) {
+          throw this.quoteUnavailable(trade.symbol);
+        }
+
+        const closePrice = trade.side === TradeSide.BUY
+          ? this.marketData.getBid(trade.symbol)
+          : this.marketData.getAsk(trade.symbol);
+        const midPrice = this.marketData.getMidPrice(trade.symbol);
+        if (!closePrice || !midPrice) {
+          throw this.quoteUnavailable(trade.symbol);
+        }
+
+        // Use mid for exposure, but value P&L at the executable close-side price.
+        const marginCalc = this.calculateRequiredMargin(
+          trade.symbol,
+          trade.volume,
+          midPrice,
+          instrument.defaultLeverage,
+        );
+
+        usedMargin = usedMargin.plus(marginCalc.requiredMargin);
+        totalExposure = totalExposure.plus(marginCalc.notionalValue);
+
+        // Calculate unrealized P&L
+        const pnl = this.calculateUnrealizedPnl(trade, closePrice, instrument);
+        unrealizedPnl = unrealizedPnl.plus(pnl);
       }
-
-      if (!this.marketData.isMarketAvailable(trade.symbol)) {
-        throw this.quoteUnavailable(trade.symbol);
-      }
-
-      const closePrice = trade.side === TradeSide.BUY
-        ? this.marketData.getBid(trade.symbol)
-        : this.marketData.getAsk(trade.symbol);
-      const midPrice = this.marketData.getMidPrice(trade.symbol);
-      if (!closePrice || !midPrice) {
-        throw this.quoteUnavailable(trade.symbol);
-      }
-
-      // Use mid for exposure, but value P&L at the executable close-side price.
-      const marginCalc = this.calculateRequiredMargin(
-        trade.symbol,
-        trade.volume,
-        midPrice,
-        instrument.defaultLeverage,
-      );
-
-      usedMargin = usedMargin.plus(marginCalc.requiredMargin);
-      totalExposure = totalExposure.plus(marginCalc.notionalValue);
-
-      // Calculate unrealized P&L
-      const pnl = this.calculateUnrealizedPnl(trade, closePrice, instrument);
-      unrealizedPnl = unrealizedPnl.plus(pnl);
     }
 
     // Round used margin

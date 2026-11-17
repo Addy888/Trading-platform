@@ -56,7 +56,19 @@ export class AngelOneAdapter implements BrokerProvider {
         body: JSON.stringify(loginPayload),
       });
 
-      const data: AngelOneLoginResponse | AngelOneErrorResponse = await response.json();
+      const data = await response.json() as unknown;
+
+      // Type guard: validate response structure
+      if (!this.isValidAngelOneResponse(data)) {
+        this.logger.error('Angel One login returned invalid response structure');
+        throw new HttpException(
+          {
+            error: 'BROKER_INVALID_RESPONSE',
+            message: 'Broker returned an invalid response',
+          },
+          HttpStatus.BAD_GATEWAY,
+        );
+      }
 
       if (!data.status || !('data' in data)) {
         this.logger.error(`Angel One authentication failed: ${data.message}`);
@@ -144,7 +156,19 @@ export class AngelOneAdapter implements BrokerProvider {
         },
       });
 
-      const data: AngelOneProfileResponse | AngelOneErrorResponse = await response.json();
+      const data = await response.json() as unknown;
+
+      // Type guard: validate response structure
+      if (!this.isValidAngelOneResponse(data)) {
+        this.logger.error('Angel One profile returned invalid response structure');
+        throw new HttpException(
+          {
+            error: 'BROKER_INVALID_RESPONSE',
+            message: 'Broker returned an invalid response',
+          },
+          HttpStatus.BAD_GATEWAY,
+        );
+      }
 
       if (!data.status || !('data' in data)) {
         this.logger.error(`Failed to fetch profile: ${data.message}`);
@@ -219,7 +243,19 @@ export class AngelOneAdapter implements BrokerProvider {
         },
       });
 
-      const data: AngelOneRMSLimitResponse | AngelOneErrorResponse = await response.json();
+      const data = await response.json() as unknown;
+
+      // Type guard: validate response structure
+      if (!this.isValidAngelOneResponse(data)) {
+        this.logger.error('Angel One RMS returned invalid response structure');
+        throw new HttpException(
+          {
+            error: 'BROKER_INVALID_RESPONSE',
+            message: 'Broker returned an invalid response',
+          },
+          HttpStatus.BAD_GATEWAY,
+        );
+      }
 
       if (!data.status || !('data' in data)) {
         this.logger.warn(`Failed to fetch RMS data: ${data.message}`);
@@ -369,6 +405,20 @@ export class AngelOneAdapter implements BrokerProvider {
         code: errorCode,
       },
       HttpStatus.BAD_REQUEST,
+    );
+  }
+
+  /**
+   * Type guard to validate Angel One response structure
+   */
+  private isValidAngelOneResponse(data: unknown): data is (AngelOneLoginResponse | AngelOneProfileResponse | AngelOneRMSLimitResponse | AngelOneErrorResponse) {
+    return (
+      typeof data === 'object' &&
+      data !== null &&
+      'status' in data &&
+      typeof (data as any).status === 'boolean' &&
+      'message' in data &&
+      typeof (data as any).message === 'string'
     );
   }
 }

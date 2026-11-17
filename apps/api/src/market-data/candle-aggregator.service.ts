@@ -36,11 +36,18 @@ export class CandleAggregatorService {
       const next = applyTick(history, update.price, providerMs, intervalMs(timeframe));
       const candle = next.at(-1);
       if (!candle) continue;
+      
       const previous = history.at(-1);
       if (previous && previous.time === candle.time && previous.close === candle.close && previous.high === candle.high && previous.low === candle.low) {
         continue;
       }
+      
       this.series.set(key, next.slice(-8));
+      
+      // ✅ FIX: Verify candle alignment in debug logging
+      const intervalSeconds = intervalMs(timeframe) / 1000;
+      const isAligned = (candle.time % intervalSeconds) === 0;
+      
       const payload: ForexCandleUpdate = {
         symbol,
         timeframe,
@@ -53,8 +60,9 @@ export class CandleAggregatorService {
         serverReceivedTimestamp: update.serverReceivedTimestamp.toISOString(),
       };
       this.events.emit('market.candle.update', payload);
+      
       if (timeframe === '1m') {
-        this.logger.debug(`1m ${symbol} ${new Date(candle.time * 1000).toISOString()} C=${candle.close}`);
+        this.logger.debug(`1m ${symbol} ${new Date(candle.time * 1000).toISOString()} C=${candle.close}` + (isAligned ? '' : ` [WARNING: NOT ALIGNED]`));
       }
     }
   }

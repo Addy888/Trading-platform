@@ -42,3 +42,52 @@ prisma/migrations/
 
 # Build outputs
 *.tsbuildinfo
+
+@'
+# AI and editor caches
+.cache/
+.antigravity/
+.codex/
+
+# Dependencies
+node_modules/
+venv/
+.venv/
+
+# Build files
+dist/
+build/
+.next/
+
+# Environment and logs
+.env
+.env.*
+*.log
+
+# Python cache
+__pycache__/
+*.pyc
+
+# OS files
+.DS_Store
+Thumbs.db
+'@ | Set-Content .gitignore
+
+@'
+.cache/
+.antigravity/
+.codex/
+node_modules/
+venv/
+.venv/
+__pycache__/
+*.pyc
+.next/
+dist/
+build/
+.env
+.env.*
+*.log
+.DS_Store
+Thumbs.db
+'@ | Set-Content .gitignore

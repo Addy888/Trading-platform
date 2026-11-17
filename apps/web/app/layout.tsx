@@ -15,8 +15,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Trading Platform",
-  description: "White-label Trading Platform",
+  title: "ASSETS FUNDED | Premium Prop Trading Platform",
+  description: "Trade bigger, think smarter, get funded. Join thousands of traders worldwide accessing funded trading opportunities with ASSETS FUNDED.",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

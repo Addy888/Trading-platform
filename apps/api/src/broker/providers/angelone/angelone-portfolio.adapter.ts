@@ -75,14 +75,26 @@ export class AngelOnePortfolioAdapter {
         },
       );
 
-      const data: AngelOnePositionResponse | AngelOneErrorResponse = await response.json();
+      const data = await response.json() as unknown;
+
+      // Type guard: validate response structure
+      if (!this.isValidAngelOneResponse(data)) {
+        this.logger.error('Position fetch returned invalid response structure');
+        throw new HttpException(
+          {
+            error: 'BROKER_INVALID_RESPONSE',
+            message: 'Broker returned an invalid response',
+          },
+          HttpStatus.BAD_GATEWAY,
+        );
+      }
 
       if (!data.status || !('data' in data)) {
         this.logger.error(`Failed to fetch positions: ${data.message}`);
         throw this.mapAngelOneError(data as AngelOneErrorResponse);
       }
 
-      this.logger.log(`✓ Fetched ${data.data.length} positions`);
+      this.logger.log(`✓ Fetched ${(data as AngelOnePositionResponse).data.length} positions`);
       return data as AngelOnePositionResponse;
     } catch (error) {
       if (error instanceof HttpException) {
@@ -153,14 +165,26 @@ export class AngelOnePortfolioAdapter {
         },
       );
 
-      const data: AngelOneHoldingResponse | AngelOneErrorResponse = await response.json();
+      const data = await response.json() as unknown;
+
+      // Type guard: validate response structure
+      if (!this.isValidAngelOneResponse(data)) {
+        this.logger.error('Holdings fetch returned invalid response structure');
+        throw new HttpException(
+          {
+            error: 'BROKER_INVALID_RESPONSE',
+            message: 'Broker returned an invalid response',
+          },
+          HttpStatus.BAD_GATEWAY,
+        );
+      }
 
       if (!data.status || !('data' in data)) {
         this.logger.error(`Failed to fetch holdings: ${data.message}`);
         throw this.mapAngelOneError(data as AngelOneErrorResponse);
       }
 
-      this.logger.log(`✓ Fetched ${data.data.holdings.length} holdings`);
+      this.logger.log(`✓ Fetched ${(data as AngelOneHoldingResponse).data.holdings.length} holdings`);
       return data as AngelOneHoldingResponse;
     } catch (error) {
       if (error instanceof HttpException) {
@@ -230,7 +254,19 @@ export class AngelOnePortfolioAdapter {
         },
       );
 
-      const data: AngelOneFundsResponse | AngelOneErrorResponse = await response.json();
+      const data = await response.json() as unknown;
+
+      // Type guard: validate response structure
+      if (!this.isValidAngelOneResponse(data)) {
+        this.logger.error('Funds fetch returned invalid response structure');
+        throw new HttpException(
+          {
+            error: 'BROKER_INVALID_RESPONSE',
+            message: 'Broker returned an invalid response',
+          },
+          HttpStatus.BAD_GATEWAY,
+        );
+      }
 
       if (!data.status || !('data' in data)) {
         this.logger.error(`Failed to fetch funds: ${data.message}`);
@@ -304,6 +340,20 @@ export class AngelOnePortfolioAdapter {
         code: errorCode,
       },
       HttpStatus.BAD_REQUEST,
+    );
+  }
+
+  /**
+   * Type guard to validate Angel One response structure
+   */
+  private isValidAngelOneResponse(data: unknown): data is (AngelOnePositionResponse | AngelOneHoldingResponse | AngelOneFundsResponse | AngelOneErrorResponse) {
+    return (
+      typeof data === 'object' &&
+      data !== null &&
+      'status' in data &&
+      typeof (data as any).status === 'boolean' &&
+      'message' in data &&
+      typeof (data as any).message === 'string'
     );
   }
 }

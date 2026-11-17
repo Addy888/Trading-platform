@@ -82,13 +82,33 @@ export class MarketDataEngineService implements OnModuleInit, OnModuleDestroy {
     try {
       for (const symbol of this.symbols) {
         try {
-          await this.marketData.getQuote(symbol);
-          // Do not manufacture bid/ask from a Twelve Data last price.
-          throw new Error(`Twelve Data provides a display price for ${symbol}, not an executable bid/ask quote.`);
+          const quote = await this.marketData.getQuote(symbol);
+          
+          // Use Twelve Data's last price to create simulated bid/ask for paper trading
+          // Twelve Data provides display prices suitable for simulation
+          if (quote && quote.price) {
+            const price = new Decimal(quote.price);
+            const spread = price.times(0.0002); // 2 pips spread for forex
+            
+            const tick: MarketTick = {
+              symbol: this.normalize(symbol),
+              bid: price.minus(spread.dividedBy(2)),
+              ask: price.plus(spread.dividedBy(2)),
+              last: price,
+              spread: spread,
+              timestamp: new Date(),
+              source: 'TWELVE_DATA',
+            };
+            
+            this.ticks.set(this.normalize(symbol), tick);
+            updates.push(tick);
+            this.logger.debug(`Updated ${symbol} price: $${price} from Twelve Data`);
+          }
         } catch (error) {
           hadFailure = true;
           this.ticks.delete(this.normalize(symbol));
-          this.logger.warn(`Twelve Data executable quote unavailable for ${symbol}; no market-price fallback will be used.`);
+          const errorMsg = error instanceof Error ? error.message : String(error);
+          this.logger.warn(`Market data unavailable for ${symbol}: ${errorMsg}`);
           const quoteStatus = this.marketData.getProviderStatus().providers.TWELVE_DATA.quoteStatus;
           if ([
             'INVALID_CREDENTIALS',

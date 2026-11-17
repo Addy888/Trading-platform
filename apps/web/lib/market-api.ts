@@ -85,8 +85,9 @@ export const marketApi = {
     return requestMarket<{ success: true; provider: 'TWELVE_DATA'; symbol: string; interval: string; count: number; candles: MarketCandle[]; metadata: CandleMetadata }>(`${API_BASE_URL}/market/candles?${query}`, token);
   },
   getQuote: (token: string, symbol: string, exchange?: string) => {
-    const query = exchange ? `?exchange=${encodeURIComponent(exchange)}` : '';
-    return requestMarket<{ success: true; provider: 'TWELVE_DATA'; servedAt?: string; timestamp?: string; quote: { symbol: string; price: string; close: string; change?: string; percentChange?: string; timestamp: string; fetchedAt?: string } }>(`${API_BASE_URL}/market/quote/${encodeURIComponent(symbol)}${query}`, token);
+    const query = new URLSearchParams({ symbol });
+    if (exchange) query.set('exchange', exchange);
+    return requestMarket<{ success: true; provider: 'TWELVE_DATA'; servedAt?: string; timestamp?: string; quote: { symbol: string; price: string; close: string; change?: string; percentChange?: string; timestamp: string; fetchedAt?: string } }>(`${API_BASE_URL}/market/quote?${query}`, token);
   },
   getInstruments: async (token: string) => (await requestMarket<{ provider: 'TWELVE_DATA'; instruments: string[] }>(`${API_BASE_URL}/market/instruments`, token)).instruments,
   getExchanges: (token: string, options: { query?: string; type?: 'ALL' | 'STOCK' | 'CRYPTO'; page?: number; limit?: number } = {}) => {

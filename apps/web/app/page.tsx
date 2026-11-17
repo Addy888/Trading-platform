@@ -3,14 +3,18 @@
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
-import { LandingHeader } from '@/components/landing/header';
-import { Hero } from '@/components/landing/hero';
-import { DashboardPreview } from '@/components/landing/dashboard-preview';
-import { MarketsSection } from '@/components/landing/markets-section';
-import { FeaturesSection } from '@/components/landing/features-section';
-import { HowItWorksSection } from '@/components/landing/how-it-works';
-import { CTASection } from '@/components/landing/cta-section';
-import { LandingFooter } from '@/components/landing/footer';
+import {
+  AssetsFundedNavbar,
+  HeroSection,
+  MarketTicker,
+  FeaturesSection,
+  StatsSection,
+  ChallengeSelection,
+  HowItWorksSection,
+  FAQSection,
+  FinalCTA,
+  AssetsFundedFooter,
+} from '@/components/landing-v2';
 
 export default function Home() {
   const router = useRouter();
@@ -24,25 +28,30 @@ export default function Home() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-[#070908]">
-        <div className="text-[#F5F7F4]">Loading...</div>
+      <div className="min-h-screen flex items-center justify-center bg-black">
+        <div className="flex items-center gap-3">
+          <div className="w-6 h-6 border-2 border-[#00A3FF] border-t-transparent rounded-full animate-spin" />
+          <span className="text-gray-300">Loading...</span>
+        </div>
       </div>
     );
   }
 
   // If user is logged in, they'll be redirected, but show landing page during check
   return (
-    <div className="min-h-screen bg-[#070908]">
-      <LandingHeader />
+    <div className="min-h-screen bg-black">
+      <AssetsFundedNavbar />
       <main>
-        <Hero />
-        <DashboardPreview />
-        <MarketsSection />
+        <HeroSection />
+        <MarketTicker />
         <FeaturesSection />
+        <StatsSection />
+        <ChallengeSelection />
         <HowItWorksSection />
-        <CTASection />
+        <FAQSection />
+        <FinalCTA />
       </main>
-      <LandingFooter />
+      <AssetsFundedFooter />
     </div>
   );
 }

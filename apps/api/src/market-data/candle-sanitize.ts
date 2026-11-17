@@ -123,10 +123,25 @@ export function applyTick(
   if (!Number.isFinite(price) || price <= 0 || !Number.isFinite(providerTimestampMs) || providerTimestampMs <= 0) {
     return history;
   }
+  
+  // ✅ CRITICAL FIX: Align tick to candle boundary (start of period)
+  // For example, a tick at 13:48:35 in a 1H candle should align to 13:00:00
   const bucketMs = Math.floor(providerTimestampMs / intervalMilliseconds) * intervalMilliseconds;
   const time = Math.floor(bucketMs / 1000);
+  
   const last = history.at(-1);
-  if (last && time < last.time) return history;
+  if (last && time < last.time) {
+    // ✅ FIX: Log when we receive an older tick (debugging aid)
+    console.debug(`[applyTick] Received tick older than current candle:`, {
+      tickTime: time,
+      tickIso: new Date(time * 1000).toISOString(),
+      lastTime: last.time,
+      lastIso: new Date(last.time * 1000).toISOString(),
+      diffSeconds: last.time - time,
+    });
+    return history;
+  }
+  
   if (last && time === last.time) {
     return mergeCandleUpdate(history, {
       time,

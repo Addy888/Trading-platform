@@ -496,6 +496,23 @@ export class TradingEngineService {
   }
 
   /**
+   * Verify account ownership
+   */
+  async verifyAccountOwnership(accountId: string, userId: string): Promise<void> {
+    const account = await this.prisma.tradingAccount.findUnique({
+      where: { id: accountId },
+    });
+
+    if (!account) {
+      throw new NotFoundException('Trading account not found');
+    }
+
+    if (account.userId !== userId) {
+      throw new ForbiddenException('You do not own this trading account');
+    }
+  }
+
+  /**
    * Get open positions
    */
   async getOpenPositions(tradingAccountId: string, userId: string) {

@@ -1,0 +1,13 @@
+URGENT: Save Original ASSETS FUNDED Logo
+
+Please save the original ASSETS FUNDED logo image (the one with black background, AF symbol, and text) to:
+
+C:\Users\ADITYA\OneDrive\Desktop\Trading\tradeing\apps\web\public\assets-funded-logo.png
+
+The image specifications:
+- Dimensions: 900x600 pixels (or original dimensions)
+- Format: PNG
+- Background: Black
+- Content: AF symbol + "ASSETS" + "FUNDED" text with blue accents
+
+After saving the file, the navbar will automatically use it.

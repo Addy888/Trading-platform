@@ -274,9 +274,12 @@ export class TradingAccountsService {
       .map((id) => id.trim())
       .filter(Boolean);
 
+    // Allow all users in dev/test if "*" is configured or list is empty
+    const allowAll = allowedUserIds.includes('*') || allowedUserIds.length === 0;
+
     return environment !== 'production' && (environment === 'development' || environment === 'test')
       && enabled
-      && allowedUserIds.includes(userId);
+      && (allowAll || allowedUserIds.includes(userId));
   }
 
   private getSimulatedTestBalance(): Decimal {
@@ -450,5 +453,121 @@ export class TradingAccountsService {
     }
 
     return account;
+  }
+
+  /**
+   * Get open positions for an account
+   */
+  async getOpenPositions(accountId: string, userId: string) {
+    // Verify ownership
+    const account = await this.findUserAccount(accountId, userId);
+
+    const openTrades = await this.prisma.trade.findMany({
+      where: {
+        tradingAccountId: accountId,
+        status: 'OPEN',
+      },
+      select: {
+        id: true,
+        symbol: true,
+        side: true,
+        volume: true,
+        entryPrice: true,
+        stopLoss: true,
+        takeProfit: true,
+        unrealizedPnl: true,
+        openedAt: true,
+      },
+      orderBy: { openedAt: 'desc' },
+    });
+
+    return openTrades.map((trade) => ({
+      id: trade.id,
+      symbol: trade.symbol,
+      side: trade.side,
+      volume: trade.volume.toString(),
+      entryPrice: trade.entryPrice.toString(),
+      stopLoss: trade.stopLoss?.toString(),
+      takeProfit: trade.takeProfit?.toString(),
+      unrealizedPnl: trade.unrealizedPnl.toString(),
+      openedAt: trade.openedAt,
+    }));
+  }
+
+  /**
+   * Get trade history with pagination and filtering
+   */
+  async getTradeHistory(
+    accountId: string,
+    userId: string,
+    params: {
+      page: number;
+      limit: number;
+      status?: string;
+    },
+  ) {
+    // Verify ownership
+    const account = await this.findUserAccount(accountId, userId);
+
+    const page = Math.max(1, params.page);
+    const limit = Math.max(1, Math.min(100, params.limit));
+    const skip = (page - 1) * limit;
+
+    const where: any = {
+      tradingAccountId: accountId,
+    };
+
+    if (params.status) {
+      where.status = params.status;
+    }
+
+    const [trades, total] = await Promise.all([
+      this.prisma.trade.findMany({
+        where,
+        select: {
+          id: true,
+          symbol: true,
+          side: true,
+          volume: true,
+          entryPrice: true,
+          exitPrice: true,
+          realizedPnl: true,
+          unrealizedPnl: true,
+          stopLoss: true,
+          takeProfit: true,
+          status: true,
+          openedAt: true,
+          closedAt: true,
+        },
+        orderBy: { openedAt: 'desc' },
+        skip,
+        take: limit,
+      }),
+      this.prisma.trade.count({ where }),
+    ]);
+
+    return {
+      trades: trades.map((trade) => ({
+        id: trade.id,
+        symbol: trade.symbol,
+        side: trade.side,
+        volume: trade.volume.toString(),
+        entryPrice: trade.entryPrice.toString(),
+        exitPrice: trade.exitPrice?.toString(),
+        realizedPnl: trade.realizedPnl.toString(),
+        unrealizedPnl: trade.unrealizedPnl.toString(),
+        stopLoss: trade.stopLoss?.toString(),
+        takeProfit: trade.takeProfit?.toString(),
+        status: trade.status,
+        openedAt: trade.openedAt,
+        closedAt: trade.closedAt,
+      })),
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
+      },
+    };
   }
 }

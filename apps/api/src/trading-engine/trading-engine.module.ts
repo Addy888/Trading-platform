@@ -6,6 +6,7 @@ import { PreTradeRiskValidationService } from './pre-trade-risk-validation.servi
 import { MarginService } from './margin.service';
 import { SlTpMonitorService } from './sl-tp-monitor.service';
 import { BalanceEquityService } from './balance-equity.service';
+import { PnLCalculationService } from './pnl-calculation.service';
 import { TradingEngineController } from './trading-engine.controller';
 import { TradingEngineV2Controller } from './trading-engine-v2.controller';
 import { AdminTradingController } from './admin-trading.controller';
@@ -44,6 +45,7 @@ import { MaxDrawdownModule } from '../max-drawdown/max-drawdown.module';
     MarginService,
     SlTpMonitorService,
     BalanceEquityService,
+    PnLCalculationService,
   ],
   exports: [
     TradingEngineService,
@@ -53,6 +55,7 @@ import { MaxDrawdownModule } from '../max-drawdown/max-drawdown.module';
     MarginService,
     SlTpMonitorService,
     BalanceEquityService,
+    PnLCalculationService,
   ],
 })
 export class TradingEngineModule {}

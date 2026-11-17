@@ -1,4 +1,4 @@
-import { Controller, Get, Param, Query, UseGuards, Request, Post, Body } from '@nestjs/common';
+import { Controller, Get, Param, Query, UseGuards, Request, Post, Body, Delete, DefaultValuePipe } from '@nestjs/common';
 import { TradingAccountsService } from './trading-accounts.service';
 import { RuleSnapshotBackfillService } from './rule-snapshot-backfill.service';
 import { AccountsQueryDto } from './dto/accounts-query.dto';
@@ -47,6 +47,39 @@ export class TradingAccountsController {
     // Verify ownership
     await this.tradingAccountsService.findUserAccount(id, req.user.sub);
     return this.challengeProgressService.getChallengeProgress(id);
+  }
+
+  /**
+   * Get open positions for an account
+   */
+  @Get(':id/positions')
+  async getOpenPositions(
+    @Param('id') accountId: string,
+    @Request() req,
+  ) {
+    return this.tradingAccountsService.getOpenPositions(accountId, req.user.sub);
+  }
+
+  /**
+   * Get trade history for an account
+   */
+  @Get(':id/trades')
+  async getTradeHistory(
+    @Param('id') accountId: string,
+    @Request() req,
+    @Query('page', new DefaultValuePipe('1')) page: string = '1',
+    @Query('limit', new DefaultValuePipe('20')) limit: string = '20',
+    @Query('status') status?: string,
+  ) {
+    return this.tradingAccountsService.getTradeHistory(
+      accountId,
+      req.user.sub,
+      {
+        page: parseInt(page, 10) || 1,
+        limit: parseInt(limit, 10) || 20,
+        status,
+      },
+    );
   }
 }
 

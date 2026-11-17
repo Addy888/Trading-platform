@@ -1,11 +1,12 @@
 @import "tailwindcss";
 
 :root {
-  --background: #070908;
-  --foreground: #F5F7F4;
-  --surface: #101310;
-  --primary: #B8FF85;
-  --muted: #999F99;
+  --background: #000000;
+  --foreground: #FFFFFF;
+  --surface: #0A0A0F;
+  --primary: #00A3FF;
+  --primary-dark: #0080CC;
+  --muted: #6B7280;
 }
 
 @theme inline {
@@ -22,6 +23,8 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: var(--font-geist-sans), -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 @keyframes fadeInUp {
@@ -53,6 +56,15 @@ body {
   }
 }
 
+@keyframes pulse-glow {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
 .animate-fade-in-up {
   animation: fadeInUp 0.8s ease-out;
 }
@@ -77,17 +89,40 @@ body {
 
 /* Glass effect utility */
 .glass-effect {
-  background: rgba(16, 19, 16, 0.6);
+  background: rgba(10, 10, 15, 0.6);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
   border: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 /* Glow effects */
-.glow-green {
-  box-shadow: 0 0 20px rgba(184, 255, 133, 0.3), 0 0 40px rgba(184, 255, 133, 0.1);
+.glow-blue {
+  box-shadow: 0 0 20px rgba(0, 163, 255, 0.3), 0 0 40px rgba(0, 163, 255, 0.1);
 }
 
-.glow-green-soft {
-  box-shadow: 0 0 40px rgba(184, 255, 133, 0.15);
+.glow-blue-soft {
+  box-shadow: 0 0 40px rgba(0, 163, 255, 0.15);
+}
+
+/* Smooth scrolling */
+html {
+  scroll-behavior: smooth;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: #000;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #1a1a1f;
+  border-radius: 5px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #2a2a2f;
 }

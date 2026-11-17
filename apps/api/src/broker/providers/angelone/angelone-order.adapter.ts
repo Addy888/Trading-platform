@@ -64,7 +64,19 @@ export class AngelOneOrderAdapter {
         body: JSON.stringify(orderRequest),
       });
 
-      const data: AngelOnePlaceOrderResponse | AngelOneErrorResponse = await response.json();
+      const data = await response.json() as unknown;
+
+      // Type guard: validate response structure
+      if (!this.isValidAngelOneResponse(data)) {
+        this.logger.error('Order placement returned invalid response structure');
+        throw new HttpException(
+          {
+            error: 'BROKER_INVALID_RESPONSE',
+            message: 'Broker returned an invalid response',
+          },
+          HttpStatus.BAD_GATEWAY,
+        );
+      }
 
       if (!data.status || !('data' in data)) {
         this.logger.error(`Order placement failed: ${data.message}`);
@@ -134,7 +146,19 @@ export class AngelOneOrderAdapter {
         body: JSON.stringify(orderRequest),
       });
 
-      const data: AngelOneOrderStatusResponse | AngelOneErrorResponse = await response.json();
+      const data = await response.json() as unknown;
+
+      // Type guard: validate response structure
+      if (!this.isValidAngelOneResponse(data)) {
+        this.logger.error('Order status fetch returned invalid response structure');
+        throw new HttpException(
+          {
+            error: 'BROKER_INVALID_RESPONSE',
+            message: 'Broker returned an invalid response',
+          },
+          HttpStatus.BAD_GATEWAY,
+        );
+      }
 
       if (!data.status || !('data' in data)) {
         this.logger.error(`Order status fetch failed: ${data.message}`);
@@ -195,7 +219,19 @@ export class AngelOneOrderAdapter {
         },
       });
 
-      const data: AngelOneOrderBookResponse | AngelOneErrorResponse = await response.json();
+      const data = await response.json() as unknown;
+
+      // Type guard: validate response structure
+      if (!this.isValidAngelOneResponse(data)) {
+        this.logger.error('Order book fetch returned invalid response structure');
+        throw new HttpException(
+          {
+            error: 'BROKER_INVALID_RESPONSE',
+            message: 'Broker returned an invalid response',
+          },
+          HttpStatus.BAD_GATEWAY,
+        );
+      }
 
       if (!data.status || !('data' in data)) {
         this.logger.error(`Order book fetch failed: ${data.message}`);
@@ -261,7 +297,19 @@ export class AngelOneOrderAdapter {
         body: JSON.stringify(cancelRequest),
       });
 
-      const data: AngelOneCancelOrderResponse | AngelOneErrorResponse = await response.json();
+      const data = await response.json() as unknown;
+
+      // Type guard: validate response structure
+      if (!this.isValidAngelOneResponse(data)) {
+        this.logger.error('Order cancellation returned invalid response structure');
+        throw new HttpException(
+          {
+            error: 'BROKER_INVALID_RESPONSE',
+            message: 'Broker returned an invalid response',
+          },
+          HttpStatus.BAD_GATEWAY,
+        );
+      }
 
       if (!data.status || !('data' in data)) {
         this.logger.error(`Order cancellation failed: ${data.message}`);
@@ -376,6 +424,20 @@ export class AngelOneOrderAdapter {
         code: errorCode,
       },
       HttpStatus.BAD_REQUEST,
+    );
+  }
+
+  /**
+   * Type guard to validate Angel One response structure
+   */
+  private isValidAngelOneResponse(data: unknown): data is (AngelOnePlaceOrderResponse | AngelOneOrderStatusResponse | AngelOneOrderBookResponse | AngelOneCancelOrderResponse | AngelOneErrorResponse) {
+    return (
+      typeof data === 'object' &&
+      data !== null &&
+      'status' in data &&
+      typeof (data as any).status === 'boolean' &&
+      'message' in data &&
+      typeof (data as any).message === 'string'
     );
   }
 }

@@ -33,7 +33,11 @@ export function useMarketQuotes(
   const fetchGenerationRef = useRef(0);
   const failureCountRef = useRef(0);
   const inFlightRef = useRef(false);
-  const symbolKey = symbols.join(',');
+  
+  // ✅ FIX RATE LIMITS: Only poll the selected symbol to reduce API calls
+  // Market Watch can display all symbols, but polling should only fetch the displayed one
+  const symbolsToFetch = enabled && selectedSymbol && symbols.includes(selectedSymbol) ? [selectedSymbol] : [];
+  const symbolKey = symbolsToFetch.join(',');
 
   const fetchQuotes = useCallback(async (generation: number): Promise<number | null> => {
     if (generation !== fetchGenerationRef.current) return null;

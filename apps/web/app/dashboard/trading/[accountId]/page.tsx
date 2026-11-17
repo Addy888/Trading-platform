@@ -40,6 +40,8 @@ export default function TradingTerminalPage() {
   const candleHistoryKeyRef = useRef<string | null>(null);
   const hasCandleHistoryRef = useRef(false);
   const marketDataEnabledRef = useRef(false);
+  // ✅ FIX RATE LIMITS: Track in-flight candle requests to prevent duplicates
+  const candleInFlightRef = useRef(false);
   // ✅ PHASE 2: Historical pagination state
   const [isLoadingOlderCandles, setIsLoadingOlderCandles] = useState(false);
   const [hasMoreHistory, setHasMoreHistory] = useState(true);
@@ -459,15 +461,22 @@ export default function TradingTerminalPage() {
   const loadCandles = async (symbol: string, timeframe: string, exchange?: string) => {
     if (!accessToken || !marketDataEnabledRef.current) return;
     if (candleRetryTimerRef.current) clearTimeout(candleRetryTimerRef.current);
+    
     const requestId = ++candleRequestRef.current;
     const historyKey = `${symbol}:${exchange || ''}:${timeframe}`;
+    
+    // ✅ FIX RATE LIMITS: Prevent duplicate simultaneous requests for same symbol/timeframe/exchange
+    if (candleInFlightRef.current && candleHistoryKeyRef.current === historyKey) {
+      console.log('[loadCandles] Request already in-flight for same symbol/timeframe/exchange, skipping');
+      return;
+    }
+    
     if (candleHistoryKeyRef.current !== historyKey) {
       candleHistoryKeyRef.current = historyKey;
       hasCandleHistoryRef.current = false;
       setCandles([]);
       setLatestCandleUpdate(null);
-      clearWsLatestCandle(); // ✅ Clear stale WebSocket candle when switching symbol/timeframe
-      // ✅ PHASE 2: Reset pagination state on symbol/timeframe change
+      clearWsLatestCandle();
       setHasMoreHistory(true);
       setIsLoadingOlderCandles(false);
       paginationRequestRef.current++;
@@ -475,7 +484,6 @@ export default function TradingTerminalPage() {
     setCandlesLoading(!hasCandleHistoryRef.current);
     setChartError(null);
     
-    // ✅ FIXED: Correct interval mapping - backend expects these specific formats
     const intervalMap: Record<string, string> = { 
       '1m': '1min',
       '5m': '5min',
@@ -492,6 +500,9 @@ export default function TradingTerminalPage() {
       setCandlesLoading(false);
       return;
     }
+    
+    // ✅ FIX RATE LIMITS: Mark as in-flight before making request
+    candleInFlightRef.current = true;
     
     try {
       // ✅ PHASE 1: Load 500 candles initially for better historical context
@@ -561,6 +572,34 @@ export default function TradingTerminalPage() {
         
         // ✅ Lightweight Charts expects Unix timestamp in SECONDS
         const time = Math.floor(timestamp / 1000);
+        
+        // ✅ FIX: Verify candle is aligned to timeframe boundary
+        const intervalMap: Record<string, number> = {
+          '1m': 60,
+          '5m': 300,
+          '15m': 900,
+          '30m': 1800,
+          '1H': 3600,
+          '4H': 14400,
+          '1D': 86400,
+        };
+        const intervalSeconds = intervalMap[timeframe] || 3600;
+        const alignedTime = Math.floor(time / intervalSeconds) * intervalSeconds;
+        
+        if (time !== alignedTime) {
+          console.warn(`[loadCandles] Candle ${idx} timestamp not aligned to ${timeframe} boundary:`, {
+            timestamp: candle.timestamp,
+            rawTime: time,
+            rawIso: new Date(time * 1000).toISOString(),
+            alignedTime,
+            alignedIso: new Date(alignedTime * 1000).toISOString(),
+            offsetSeconds: time - alignedTime,
+          });
+        }
+        
+        // ✅ Use aligned time for consistency with WebSocket
+        const finalTime = alignedTime;
+        
         const open = Number(candle.open);
         const high = Number(candle.high);
         const low = Number(candle.low);
@@ -596,7 +635,7 @@ export default function TradingTerminalPage() {
           throw new Error(`Invalid OHLC: low (${low}) must be <= min(open, close) at candle ${idx}`);
         }
         
-        return { time, open, high, low, close };
+        return { time: finalTime, open, high, low, close };
       });
       
       // ✅ Validate chronological order and no duplicates
@@ -663,9 +702,23 @@ export default function TradingTerminalPage() {
       if (requestId !== candleRequestRef.current) return;
       stopMarketDataAfterTerminalError(err);
       if (!hasCandleHistoryRef.current) setCandles([]);
+      
       const errorMessage = err.message || 'Twelve Data market data is temporarily unavailable. Please retry later.';
-      setChartError(errorMessage);
-      console.error('[loadCandles] Error:', errorMessage);
+      
+      // ✅ FIX RATE LIMITS: Better handling of rate-limited responses
+      // Don't clear existing candles on rate limit - show them as stale
+      if (err instanceof MarketDataError && err.category === 'RATE_LIMITED') {
+        console.warn('[loadCandles] Rate limited - preserving existing candles:', {
+          hasCandleHistory: hasCandleHistoryRef.current,
+          existingCandleCount: candles.length,
+          retryAfterMs: err.retryAfterMs,
+        });
+        // Keep existing candles visible and just show a transient message
+        setChartError('Twelve Data request limit reached. Your existing chart data is preserved. Please wait before trying again.');
+      } else {
+        setChartError(errorMessage);
+        console.error('[loadCandles] Error:', errorMessage);
+      }
       
       if (
         err instanceof MarketDataError &&
@@ -675,32 +728,71 @@ export default function TradingTerminalPage() {
         const attempt = ++candleRetryAttemptRef.current;
         const exponentialDelay = Math.min(2000 * (2 ** (attempt - 1)), 30000);
         const retryAfter = Math.min(err.retryAfterMs || 0, 120000);
+        const totalWait = Math.max(exponentialDelay, retryAfter);
+        
+        console.log('[loadCandles] Scheduling retry:', {
+          attempt,
+          exponentialDelay,
+          retryAfter,
+          totalWait,
+        });
+        
         candleRetryTimerRef.current = setTimeout(
           () => void loadCandles(symbol, timeframe, exchange),
-          Math.max(exponentialDelay, retryAfter),
+          totalWait,
         );
       }
     } finally {
+      candleInFlightRef.current = false;
       if (requestId === candleRequestRef.current) setCandlesLoading(false);
     }
   };
 
+  // ✅ FIX RATE LIMITS: Stable polling that doesn't retrigger on every dependency change
+  // Use refs to capture current values without recreating the effect
+  const selectedSymbolRef = useRef(selectedSymbol);
+  const selectedTimeframeRef = useRef(selectedTimeframe);
+  const selectedExchangeRef = useRef(selectedExchange);
+  const marketDataPollingIntervalRef = useRef(marketDataPollingInterval);
+  
   useEffect(() => {
-    if (!marketDataEnabled || !accessToken || !selectedSymbol || !selectedTimeframe) return;
+    selectedSymbolRef.current = selectedSymbol;
+  }, [selectedSymbol]);
+  
+  useEffect(() => {
+    selectedTimeframeRef.current = selectedTimeframe;
+  }, [selectedTimeframe]);
+  
+  useEffect(() => {
+    selectedExchangeRef.current = selectedExchange;
+  }, [selectedExchange]);
+  
+  useEffect(() => {
+    marketDataPollingIntervalRef.current = marketDataPollingInterval;
+  }, [marketDataPollingInterval]);
+
+  useEffect(() => {
+    if (!marketDataEnabled || !accessToken) return;
 
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout>;
     const pollCandles = async () => {
-      await loadCandles(selectedSymbol, selectedTimeframe, selectedExchange);
-      if (!cancelled) timer = setTimeout(pollCandles, marketDataPollingInterval);
+      // Use refs to get current values without dependency array issues
+      await loadCandles(
+        selectedSymbolRef.current,
+        selectedTimeframeRef.current,
+        selectedExchangeRef.current
+      );
+      if (!cancelled) timer = setTimeout(pollCandles, marketDataPollingIntervalRef.current);
     };
 
-    timer = setTimeout(pollCandles, marketDataPollingInterval);
+    // ✅ FIX RATE LIMITS: Initial load after small delay to avoid thundering herd
+    timer = setTimeout(pollCandles, Math.min(1000, marketDataPollingIntervalRef.current));
     return () => {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [accessToken, marketDataEnabled, marketDataPollingInterval, selectedExchange, selectedSymbol, selectedTimeframe]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [accessToken, marketDataEnabled]); // ✅ REDUCED dependencies to only essential ones
 
   useEffect(() => () => {
     if (candleRetryTimerRef.current) clearTimeout(candleRetryTimerRef.current);
@@ -909,30 +1001,97 @@ export default function TradingTerminalPage() {
   }, [selectedSymbol, selectedTimeframe, selectedExchange, accessToken]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Use WebSocket candle updates when available, otherwise use polling updates
+  // ✅ FIX: Calculate timeframe interval in seconds for alignment verification
+  const timeframeIntervalSeconds = useMemo(() => {
+    const intervals: Record<string, number> = {
+      '1m': 60,
+      '5m': 300,
+      '15m': 900,
+      '30m': 1800,
+      '1H': 3600,
+      '4H': 14400,
+      '1D': 86400,
+    };
+    return intervals[selectedTimeframe] || 3600;
+  }, [selectedTimeframe]);
+
+  // ✅ FIX: Verify if a timestamp is properly aligned to the timeframe boundary
+  const isAlignedToTimeframe = useCallback((unixSeconds: number, intervalSeconds: number): boolean => {
+    return (unixSeconds % intervalSeconds) === 0;
+  }, []);
+
+  // ✅ FIX: Get the aligned candle start time for a given timestamp
+  const getAlignedCandleTime = useCallback((unixSeconds: number, intervalSeconds: number): number => {
+    return Math.floor(unixSeconds / intervalSeconds) * intervalSeconds;
+  }, []);
+
   useEffect(() => {
     if (wsLatestCandle && wsMarketStatus.feedMode === 'WEBSOCKET') {
-      // ✅ CRITICAL FIX: Validate WebSocket candle timestamp before applying
+      // ✅ CRITICAL FIX: Validate WebSocket candle timestamp with alignment check
       const lastHistoryCandle = candles.at(-1);
       
-      if (lastHistoryCandle && wsLatestCandle.time < lastHistoryCandle.time) {
-        console.warn('[Trading Page] Ignoring outdated WebSocket candle:', {
-          wsTime: new Date(wsLatestCandle.time * 1000).toISOString(),
-          lastHistoryTime: new Date(lastHistoryCandle.time * 1000).toISOString(),
-          diff: lastHistoryCandle.time - wsLatestCandle.time
-        });
-        return;
-      }
+      // Align the WebSocket candle to the expected boundary
+      const wsAlignedTime = getAlignedCandleTime(wsLatestCandle.time, timeframeIntervalSeconds);
       
-      setLatestCandleUpdate(wsLatestCandle);
-      console.log('[Trading Page] Using WebSocket candle update:', {
-        time: new Date(wsLatestCandle.time * 1000).toISOString(),
-        open: wsLatestCandle.open,
-        high: wsLatestCandle.high,
-        low: wsLatestCandle.low,
-        close: wsLatestCandle.close
+      // Log diagnostic information
+      const wsIso = new Date(wsLatestCandle.time * 1000).toISOString();
+      const wsAlignedIso = new Date(wsAlignedTime * 1000).toISOString();
+      const lastHistoryIso = lastHistoryCandle ? new Date(lastHistoryCandle.time * 1000).toISOString() : 'N/A';
+      
+      console.log('[Trading Page] WebSocket candle received:', {
+        rawTime: wsLatestCandle.time,
+        rawIso: wsIso,
+        alignedTime: wsAlignedTime,
+        alignedIso: wsAlignedIso,
+        isAligned: isAlignedToTimeframe(wsLatestCandle.time, timeframeIntervalSeconds),
+        interval: `${timeframeIntervalSeconds}s`,
+        lastHistoryTime: lastHistoryCandle?.time || null,
+        lastHistoryIso,
       });
+      
+      // ✅ FIX: Use aligned time for comparison, allow updates to current candle
+      if (lastHistoryCandle) {
+        const lastHistoryAligned = getAlignedCandleTime(lastHistoryCandle.time, timeframeIntervalSeconds);
+        
+        if (wsAlignedTime < lastHistoryAligned) {
+          console.warn('[Trading Page] Ignoring outdated WebSocket candle:', {
+            wsAlignedTime,
+            wsAlignedIso,
+            lastHistoryAligned,
+            lastHistoryIso,
+            diffSeconds: lastHistoryAligned - wsAlignedTime,
+          });
+          return;
+        }
+        
+        if (wsAlignedTime === lastHistoryAligned) {
+          // ✅ FIX: Same candle period - update the current candle
+          console.log('[Trading Page] Updating current candle (same timeframe period):', {
+            alignedTime: wsAlignedTime,
+            alignedIso: wsAlignedIso,
+          });
+          setLatestCandleUpdate(wsLatestCandle);
+          return;
+        }
+        
+        if (wsAlignedTime > lastHistoryAligned) {
+          // ✅ FIX: New candle period - add to history
+          console.log('[Trading Page] New candle period detected:', {
+            wsAlignedTime,
+            wsAlignedIso,
+            lastHistoryAligned,
+            lastHistoryIso,
+          });
+          // The chart component will handle merging this with existing candles
+          setLatestCandleUpdate(wsLatestCandle);
+          return;
+        }
+      } else {
+        // No history yet, accept the WebSocket candle
+        setLatestCandleUpdate(wsLatestCandle);
+      }
     }
-  }, [wsLatestCandle, wsMarketStatus.feedMode, candles]);
+  }, [wsLatestCandle, wsMarketStatus.feedMode, candles, timeframeIntervalSeconds, getAlignedCandleTime, isAlignedToTimeframe]);
 
   useEffect(() => {
     let active = true;
