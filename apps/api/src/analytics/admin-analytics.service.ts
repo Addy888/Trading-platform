@@ -165,7 +165,7 @@ export class AdminAnalyticsService {
       select: {
         id: true,
         name: true,
-        startingBalance: true,
+        accountSize: true,
         _count: {
           select: {
             orders: true,
@@ -209,7 +209,7 @@ export class AdminAnalyticsService {
       popularPlans: popularPlans.map((plan) => ({
         id: plan.id,
         name: plan.name,
-        startingBalance: plan.startingBalance,
+        accountSize: plan.accountSize,
         orderCount: plan._count.orders,
       })),
     };

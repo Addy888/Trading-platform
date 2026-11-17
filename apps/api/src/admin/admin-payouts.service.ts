@@ -25,11 +25,6 @@ export class AdminPayoutsService {
             email: { contains: search, mode: 'insensitive' },
           },
         },
-        {
-          tradingAccount: {
-            accountNumber: { contains: search, mode: 'insensitive' },
-          },
-        },
       ];
     }
 
@@ -49,25 +44,6 @@ export class AdminPayoutsService {
         orderBy: { requestedAt: 'desc' },
         include: {
           user: {
-            select: {
-              id: true,
-              email: true,
-              firstName: true,
-              lastName: true,
-            },
-          },
-          tradingAccount: {
-            select: {
-              id: true,
-              accountNumber: true,
-              challengePlan: {
-                select: {
-                  name: true,
-                },
-              },
-            },
-          },
-          reviewer: {
             select: {
               id: true,
               email: true,
@@ -96,19 +72,6 @@ export class AdminPayoutsService {
       where: { id },
       include: {
         user: {
-          select: {
-            id: true,
-            email: true,
-            firstName: true,
-            lastName: true,
-          },
-        },
-        tradingAccount: {
-          include: {
-            challengePlan: true,
-          },
-        },
-        reviewer: {
           select: {
             id: true,
             email: true,

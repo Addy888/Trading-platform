@@ -59,14 +59,6 @@ export class AdminKYCService {
               lastName: true,
             },
           },
-          reviewer: {
-            select: {
-              id: true,
-              email: true,
-              firstName: true,
-              lastName: true,
-            },
-          },
         },
       }),
       this.prisma.kycSubmission.count({ where }),
@@ -95,14 +87,6 @@ export class AdminKYCService {
             lastName: true,
             phone: true,
             country: true,
-          },
-        },
-        reviewer: {
-          select: {
-            id: true,
-            email: true,
-            firstName: true,
-            lastName: true,
           },
         },
       },
